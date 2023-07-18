@@ -1,0 +1,117 @@
+# JLCPCB rules
+(version 1)
+
+## Drill/Hole Size
+### Drill Hole Size
+(rule "Min. Drill Hole Size"
+    (constraint hole_size (min 0.3mm))
+    (condition "A.Type == 'hole' || A.Type == 'Via' || A.Type == 'Pad' || A.Pad_Type == 'Through-hole' || A.Pad_Type == 'NPTH, mechanical'")
+)
+(rule "Max. Drill Hole Size"
+    (constraint hole_size (max 6.3mm))
+    (condition "A.Type == 'hole' || A.Type == 'Via' || A.Type == 'Pad' || A.Pad_Type == 'Through-hole' || A.Pad_Type == 'NPTH, mechanical'")
+)
+### Min. Via hole size/diameter
+(rule "Min. Drill Hole Size"
+    (constraint hole_size (min 0.3mm))
+	(constraint via_diameter (min 0.5mm))
+    (condition "A.Type == 'hole'")
+)
+### PTH hole Size
+(rule "Min. PTH Size"
+    (constraint hole_size (min 0.2mm))
+    (condition "A.Pad_Type == 'Through-hole'")
+)
+(rule "Max. PTH Size"
+    (constraint hole_size (max 6.35mm))
+    (condition "A.Pad_Type == 'Through-hole'")
+)
+
+### Pad Size
+#(rule "Min Pad Size"
+#	(constraint assertion "A.Size_X >= 1.0mm && A.Size_Y >= 1.0mm")
+#	(condition "A.Type == 'Pad'")
+#)
+(rule "Min. Pad with PTH Size"
+	(constraint hole_size (min 0.5mm))
+	(constraint annular_width (min 0.25mm))
+	(condition "A.Pad_Type == 'Through-hole'")
+)
+
+### Min. Non-plated holes
+(rule "Min. Non-plated Hole Size"
+	(constraint hole_size (min 0.5mm))
+	(condition "A.Pad_Type == 'NPTH, mechanical'")
+)
+
+### NPTH
+### Min. Plated Slots
+### Min. Non-Plated Slots
+### Min. Castellated Holes
+
+## Minimum Annular Ring
+(rule "Min. Annular Ring"
+	(constraint annular_width (min 0.13mm))
+	(condition "A.Type != 'Pad' || A.Pad_Type != 'Through-hole'")
+)
+#(rule "Min. PTH Annular Ring"
+#	(constraint annular_width (min 0.3mm))
+#	(condition "A.Type == 'Pad' && A.Pad_Type == 'Through-hole'")
+#)
+(rule "Min. Via Annular Ring"
+	(constraint annular_width (min 0.1mm))
+	(condition "A.Type == 'Via'")
+)
+
+## Minimum clearance
+### Hole to Hole clearance(Different nets)
+(rule "Hole to Hole Clearance (diff nets)"
+    (constraint hole_to_hole (min 0.5mm))
+    (condition "(A.Type == 'Hole' || A.Type == 'Via') && (B.Type == 'Hole' || B.Type == 'Via') && A.Net != B.Net")
+)
+
+### Via to Via Clearance
+(rule "Via to Via Clearance (same nets)"
+    (constraint hole_to_hole (min 0.254mm))
+    (condition "A.Type == 'Via' && B.Type == 'Via' && A.Net == B.Net")
+)
+
+### Pad to Pad clearance(No hole, Different nets)
+(rule "Pad to Pad Clearance on Different Nets (no hole)"
+    (constraint clearance (min 0.127mm))
+    (condition "A.Pad_Type == 'SMD' && B.Pad_Type == 'SMD' && A.Net != B.Net")
+)
+
+### Pad to Pad clearance(Hole, Different nets)
+(rule "Pad to Pad Clearance on Different Nets (no hole)"
+    (constraint hole_to_hole (min 0.5mm))
+    (condition "A.Pad_Type == 'Through-hole' && B.Pad_Type == 'Through-hole' && A.Net != B.Net")
+)
+
+### Via to Track
+(rule "Via to Track Clearance"
+    (constraint hole_clearance (min 0.254mm))
+    (condition "A.Type == 'Via' && B.Type == 'Track'")
+)
+
+### PTH to Track
+(rule "PTH to Track Clearance"
+    (constraint hole_clearance (min 0.33mm))
+    (condition "A.Pad_Type == 'Through-hole' && B.Type == 'Track'")
+)
+
+### NPTH to Track
+(rule "NPTH to Track Clearance"
+    (constraint hole_clearance (min 0.254mm))
+    (condition "A.Pad_Type == 'NPTH, mechanical' && B.Type == 'Track'")
+)
+
+### Pad to Track
+(rule "Pad to Track Clearance"
+    (constraint clearance (min 0.2mm))
+    (condition "A.Type == 'Pad' && B.Type == 'Track'")
+)
+
+
+
+

@@ -1,0 +1,6 @@
+Info: Front (top side) placement file: 'C:\Users\Stratos\Documents\0_projects\atmega328p-gate_controller\fab_out\atmega328p-gate_controller-top.pos'.
+Info: Component count: 19.
+Info: Back (bottom side) placement file: 'C:\Users\Stratos\Documents\0_projects\atmega328p-gate_controller\fab_out\atmega328p-gate_controller-bottom.pos'.
+Info: Component count: 0.
+Info: Full component count: 19.
+Info: File generation successful.
