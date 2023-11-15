@@ -11,6 +11,8 @@
 #define RST  PIN_PB1
 #define DIO0 PIN_PB0
 
+#define STATUS_LED PIN_PD2
+
 
 SX127X lora(CS, RST, DIO0);
 TinyMesh tm(TM_TYPE_NODE);
@@ -39,11 +41,26 @@ void SPITransfer(uint8_t addr, uint8_t *buffer, size_t length) {
 
 
 
+auto status_timer = millis();
+uint16_t pattern_intr[2][2] = {{4900, 100}, {500, 100}};
+//uint8_t pattern = 0;
+uint8_t interval = 0;
+
+void status(int pattern) {
+    if (millis() - status_timer > pattern_intr[pattern][interval]) {
+        status_timer = millis();
+        interval = !interval;
+        digitalWrite(STATUS_LED, !digitalRead(STATUS_LED));
+    }
+}
+
+
 void setup() {
     Serial.begin(9600);
     SPI.begin();
 
-    pinMode(PIN_PD2, OUTPUT);
+    pinMode(STATUS_LED, OUTPUT);
+    digitalWrite(STATUS_LED, LOW);
 
     lora.registerMicros(__micros);
     lora.registerDelay(__delay);
@@ -58,32 +75,37 @@ void setup() {
 
     uint8_t rc = lora.begin(434.0, 0x12, 8, LORA_BANDWIDTH_125kHz, LORA_SPREADING_FACTOR_9, LORA_CODING_RATE_4_7);
     if (rc) {
+        Serial.println("lora begin failed");
         while (true) {
-            Serial.println("lora begin failed");
-            delay(1000);
+            status(1);
         }
     }
+
+    digitalWrite(STATUS_LED, LOW);
 }
 
+
+auto send_timer = millis();
 void loop() {
-    digitalWrite(PIN_PD2, HIGH);
-    delay(1000);
-    digitalWrite(PIN_PD2, LOW);
-    delay(1000);
-    packet_t packet;
-    auto ret = tm.buildPacket(&packet, 255, TM_MSG_REGISTER);
-    if (ret) {
-        Serial.print("Failed to build packet: ");
-        Serial.print(ret, 2);
-        Serial.println();
-    }
-    else {
-        ret = 0;
-        ret = lora.transmit(packet.raw, packet.fields.data_length + TM_HEADER_LENGTH);
-        if (!(ret & IRQ_FLAG_TX_DONE)) {
-            Serial.print("Failed to send data: ");
+    status(0);
+
+    if (millis() - send_timer > 2000) {
+        send_timer = millis();
+        packet_t packet;
+        auto ret = tm.buildPacket(&packet, 255, TM_MSG_REGISTER);
+        if (ret) {
+            Serial.print("Failed to build packet: ");
             Serial.print(ret, 2);
             Serial.println();
+        }
+        else {
+            ret = 0;
+            ret = lora.transmit(packet.raw, packet.fields.data_length + TM_HEADER_LENGTH);
+            if (!(ret & IRQ_FLAG_TX_DONE)) {
+                Serial.print("Failed to send data: ");
+                Serial.print(ret, 2);
+                Serial.println();
+            }
         }
     }
 }
