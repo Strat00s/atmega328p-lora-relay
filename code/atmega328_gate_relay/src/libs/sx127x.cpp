@@ -10,6 +10,7 @@
  */
 
 #include "sx127x.hpp"
+#include "Arduino.h"
 
 
 //private

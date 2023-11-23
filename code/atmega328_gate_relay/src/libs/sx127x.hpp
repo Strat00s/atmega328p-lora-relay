@@ -351,6 +351,7 @@ private:
     uint16_t symbol_cnt = 100;
     uint8_t in_standby  = false;
 
+    //TODO make them arduino compatible by default?
     //callbacks
     void (*pinMode)(uint8_t pin, uint8_t mode);
     void (*pinWrite)(uint8_t pin, uint8_t lvl);
