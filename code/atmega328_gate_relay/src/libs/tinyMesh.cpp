@@ -1,5 +1,6 @@
 #include "tinyMesh.hpp"
 #include <string.h>
+#include <Arduino.h>
 
 
 TinyMesh::TinyMesh(uint8_t node_type) {
@@ -43,6 +44,10 @@ void TinyMesh::setAddress(uint8_t address) {
         this->address = address;
 }
 
+void TinyMesh::setGatewayAddress(uint8_t address) {
+    this->gateway = address;
+}
+
 void TinyMesh::setDeviceType(uint8_t node_type) {
     if (node_type > TM_TYPE_LP_NODE)
         this->node_type = TM_TYPE_NODE;
@@ -63,12 +68,16 @@ uint8_t TinyMesh::getAddress() {
     return this->address;
 }
 
+uint8_t TinyMesh::getGatewayAddress() {
+    return this->address;
+}
+
 uint8_t TinyMesh::getDeviceType() {
     return this->address;
 }
 
 uint16_t TinyMesh::getMessageId(packet_t packet) {
-    return (((uint16_t)packet.fields.msg_id_msb) << 8) | ((uint16_t)packet.fields.msg_id_lsb);
+    return ((uint16_t)packet.fields.msg_id_msb) << 8 | packet.fields.msg_id_lsb;
 }
 
 
@@ -236,15 +245,17 @@ uint16_t TinyMesh::checkHeader(packet_t packet) {
     return ret;
 }
 
+uint8_t TinyMesh::savePacketID(uint32_t packet_id, uint32_t time, bool force) {
+    if (millis != nullptr && !time)
+        time = millis() + TM_TIME_TO_STALE;
 
-uint8_t TinyMesh::savePacket(packet_t packet, uint32_t time, bool force) {
     if (sent_cnt >= TM_SENT_Q_SIZE) {
         //if full and force, just shift everything
         if (force) {
             for (int i = TM_SENT_Q_SIZE - 1; i > 0; i--) {
                 sent_packets[i] = sent_packets[i - 1];
             }
-            sent_packets[0] = createPacketID(getMessageId(packet), packet.fields.src_addr, packet.fields.dst_addr, time);
+            sent_packets[0] = (uint64_t)time << 32 | packet_id;
         }
         return TM_ERR_SENT_COUNT;
     }
@@ -252,13 +263,22 @@ uint8_t TinyMesh::savePacket(packet_t packet, uint32_t time, bool force) {
     //find first empty space and save packet ID
     for (int i = 0; i < TM_SENT_Q_SIZE; i++) {
         if (sent_packets[i] == 0) {
-            sent_packets[i] = createPacketID(getMessageId(packet), packet.fields.src_addr, packet.fields.dst_addr, time);
+            sent_packets[i] = ((uint64_t)time) << 32 | packet_id;
+            Serial.println("Saved packet: ");
+            Serial.println((uint16_t)(sent_packets[i] >> 16));
+            Serial.println((uint8_t)(sent_packets[i] >> 8));
+            Serial.println((uint8_t)(sent_packets[i]));
             break;
         }
     }
     sent_cnt++;
 
     return TM_OK;
+}
+
+uint8_t TinyMesh::savePacket(packet_t packet, uint32_t time, bool force) {
+    uint32_t packet_id = createPacketID(packet);
+    return savePacketID(packet_id, time, force);
 }
 
 uint8_t TinyMesh::clearSavedPackets(uint32_t time,  bool force) {
@@ -289,9 +309,9 @@ uint8_t TinyMesh::clearSavedPackets(uint32_t time,  bool force) {
 
 uint8_t TinyMesh::checkPacket(packet_t packet) {
     //if packet is in sent queue, it is a duplicate packet
-    uint64_t packet_id = createPacketID(getMessageId(packet), packet.fields.src_addr, packet.fields.dst_addr);
+    uint32_t packet_id = createPacketID(packet);
     for (int i = 0; i < TM_SENT_Q_SIZE; i++) {
-        if (packet_id << 32 == sent_packets[i] << 32)
+        if (packet_id == (uint32_t)sent_packets[i])
             return TM_ERR_IN_DUPLICATE;
     }
 
@@ -303,14 +323,24 @@ uint8_t TinyMesh::checkPacket(packet_t packet) {
     }
 
     //user must save this packet manually
-    if (packet.fields.dst_addr != this->address && packet.fields.dst_addr != TM_BROADCAST_ADDRESS) {
+    if (packet.fields.dst_addr != this->address) {
         return TM_ERR_IN_FORWARD;
     }
 
     //check if packet is a response to our previous request
     packet_id = createPacketID(getMessageId(packet) - 1, packet.fields.dst_addr, packet.fields.src_addr);
+    Serial.println("ID to find: ");
+    Serial.println((uint16_t)(packet_id >> 16));
+    Serial.println((uint8_t)(packet_id >> 8));
+    Serial.println((uint8_t)(packet_id));
     for (int i = 0; i < TM_SENT_Q_SIZE; i++) {
-        if (packet_id << 32 == sent_packets[i] << 32) {
+            Serial.println("Stored packet: ");
+            Serial.println((uint16_t)(sent_packets[i] >> 16));
+            Serial.println((uint8_t)(sent_packets[i] >> 8));
+            Serial.println((uint8_t)(sent_packets[i]));
+        
+        //answer to request
+        if (packet_id == (uint32_t)sent_packets[i] || packet_id >> 8 == ((uint32_t)sent_packets[i]) >> 8) {
             //check for valid port
             bool has_port = false;
             for (int j = 0; j < TM_PORT_COUNT; j++) {
@@ -330,7 +360,8 @@ uint8_t TinyMesh::checkPacket(packet_t packet) {
         }
     }
 
-    if (packet.fields.msg_type == TM_MSG_OK || packet.fields.msg_type == TM_MSG_ERR || packet.fields.msg_type == TM_MSG_CUSTOM)
+    //random answer to us
+    if (packet.fields.msg_type == TM_MSG_OK || packet.fields.msg_type == TM_MSG_ERR)
         return TM_ERR_IN_ANSWER;
 
     //packet is for us but is not a response -> new packet
@@ -339,14 +370,12 @@ uint8_t TinyMesh::checkPacket(packet_t packet) {
 }
 
 
-uint64_t TinyMesh::createPacketID(uint16_t message_id, uint8_t src_addr, uint8_t dst_addr, uint32_t time) {
-    if (millis != nullptr && !time)
-        time = millis() + TM_TIME_TO_STALE;
-    return ((uint64_t)time) << 32 | ((uint32_t)message_id) << 16 | ((uint16_t)src_addr) << 8 | dst_addr;
+uint32_t TinyMesh::createPacketID(uint16_t message_id, uint8_t src_addr, uint8_t dst_addr) {
+    return ((uint32_t)message_id) << 16 | ((uint16_t)src_addr) << 8 | dst_addr;
 }
 
-uint64_t TinyMesh::createPacketID(packet_t packet, uint32_t time) {
-    return createPacketID(getMessageId(packet), packet.fields.src_addr, packet.fields.dst_addr, time);
+uint32_t TinyMesh::createPacketID(packet_t packet) {
+    return ((uint32_t)getMessageId(packet)) << 16 | ((uint16_t)packet.fields.src_addr) << 8 | packet.fields.dst_addr;
 }
 
 uint16_t TinyMesh::lcg(uint16_t seed) {

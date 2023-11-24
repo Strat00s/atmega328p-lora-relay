@@ -240,6 +240,7 @@ Only custom messages are allowed to have flow of any size (continuous request, r
 #define TM_MSG_REGISTER      3  //register to the newtwork
 //#define TM_MSG_DEVICE_CONFIG 4  //send device configuration back
 #define TM_MSG_PORT_ADVERT   4  //advertise custom port for listening/accepting data on
+#define TM_MSG_PORT_ANOUNCEMENT 4
 #define TM_MSG_ROUTE_SOLICIT 5  //when user manually routes ports and addresses, send this to output node
 #define TM_MSG_ROUTE_ANOUNC  6  //anounc already known routes
 #define TM_MSG_RESET         7  //request a device configuration reset
@@ -286,10 +287,10 @@ Only custom messages are allowed to have flow of any size (continuous request, r
 #define TM_TIME_TO_STALE     3000 //time in ms for a saved packet to become stale
 #endif
 #ifndef TM_PORT_COUNT
-#define TM_PORT_COUNT        2
+#define TM_PORT_COUNT        2 //how manny ports to store (minimum 1)
 #endif
 #ifndef TM_SENT_Q_SIZE
-#define TM_SENT_Q_SIZE       3 //this array is of type uint64_t, so it takes a lot of space!
+#define TM_SENT_Q_SIZE       5 //this array is of type uint64_t, so it takes a lot of space!
 #endif
 
 
@@ -327,12 +328,12 @@ typedef struct {
 
 class TinyMesh {
 private:
-    uint8_t version         = TM_VERSION;
-    uint8_t address         = 0;
-    uint8_t gateway_address = 0;
-    uint8_t node_type       = 0;
-    uint8_t sent_cnt        = 0;
-    uint8_t port_cnt        = 0;
+    uint8_t version   = TM_VERSION; //supported TM version
+    uint8_t address   = 0;  //this NODE address
+    uint8_t gateway   = 0;  //gateway address
+    uint8_t node_type = 0;  //this NODE type
+    uint8_t sent_cnt  = 0;  //current number of saved sent packets
+    uint8_t port_cnt  = 0;  //current number of saved ports
     uint64_t sent_packets[TM_SENT_Q_SIZE] = {0};
     port_cfg_t ports[TM_PORT_COUNT]       = {0};
 
@@ -390,6 +391,8 @@ public:
      * @param address 
      */
     void setAddress(uint8_t address);
+
+    void setGatewayAddress(uint8_t address);
     
     /** @brief Set node type.
      * Unknown node types will be converted to TM_TYPE_NODE.
@@ -407,6 +410,7 @@ public:
 
     uint8_t getVersion();
     uint8_t getAddress();
+    uint8_t getGatewayAddress();
     uint8_t getDeviceType();
 
     /** @brief Construct and return the message ID.
@@ -469,15 +473,14 @@ public:
      * @param time Time of packet ID creation
      * @return 
      */
-    uint64_t createPacketID(uint16_t message_id, uint8_t src_addr, uint8_t dst_addr, uint32_t time = 0);
-
+    uint32_t createPacketID(uint16_t message_id, uint8_t src_addr, uint8_t dst_addr);
     /** @brief Create packet ID that is mostly internally used to save sent/forwarded packets
      * 
      * @param packet Packet whose ID is to be created 
      * @param time Time of packet ID creation
      * @return 
      */
-    uint64_t createPacketID(packet_t packet, uint32_t time = 0);
+    uint32_t createPacketID(packet_t packet);
 
     /** @brief Used before sending data on some interface to later check if incoming packet is an answer to our packet. 
      * Save packet to queue for later checking if incoming packet is an answer to rhis packet.
@@ -490,6 +493,15 @@ public:
      * @return TM_OK on success, TM_ERR_NO_SPACE if the underlying array is full.
      */
     uint8_t savePacket(packet_t packet, uint32_t time = 0, bool force = false);
+
+    /** @brief 
+     * 
+     * @param packet_id 
+     * @param time 
+     * @param force 
+     * @return 
+     */
+    uint8_t savePacketID(uint32_t packet_id, uint32_t time =0 , bool force = false);
 
     /** @brief Clear entire sent_packet queue
      * 
