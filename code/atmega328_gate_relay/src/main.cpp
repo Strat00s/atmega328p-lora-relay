@@ -13,6 +13,9 @@
 
 #define STATUS_LED PIN_PD2
 
+
+#define S_PORT 16 //our single service port
+
 /*----(FUNCTION MACROS)----*/
 #define IF_X_FALSE(x, msg, cmd) {if (x) {Serial.println(msg); cmd;}}
 #define IF_X_TRUE(x, msg, cmd)  {if (x) {Serial.print(msg); Serial.print(x, 2); Serial.print(" ("); Serial.print(x); Serial.println(")"); cmd;}}
@@ -22,6 +25,8 @@
 TinyMesh tm(TM_TYPE_NODE);
 SX127X lora(CS, RST, DIO0);
 lora434InterfaceWrapper lora_if(&lora);
+
+packet_t packet;
 
 
 
@@ -68,7 +73,7 @@ void failed() {
 }
 
 
-void printPacket(packet_t packet) {
+void printPacket() {
     Serial.print("Version:             ");
     Serial.println(packet.fields.version);
     Serial.print("Device type:         ");
@@ -100,8 +105,121 @@ int freeRam () {
 }
 
 
-packet_t packet;
+/** @brief Simple loop to wait for an answer. 
+ * 
+ * @param packet Where to save received answer
+ * @param timeout How long to wait for an answer
+ * @return true when answer is received, false on timeout
+ */
+bool waitForAnswer(packet_t *packet, unsigned long timeout) {
+    uint16_t ret;
+    
+    lora_if.startReception();
+    auto timer = millis();
+    while (millis() - timer < timeout) {
+        //got some data
+        if (digitalRead(DIO0)) {
+            uint8_t len;
+            ret = lora_if.getData(packet->raw, &len);
+            IF_X_TRUE(ret, "Failed to get data: ", continue);
+            ret = tm.checkHeader(*packet);
+            IF_X_TRUE(ret, "Incoming packet header bad: ", continue);
+            ret = tm.checkPacket(*packet);
+            IF_X_TRUE(ret, "Incoming packet not answer: ", continue);
+            ret = tm.savePacket(*packet, millis());
+            IF_X_TRUE(ret, "Failed to save packet: ", {});
+            Serial.println("Got answer");
+            return true;
+        }
+        tm.clearSavedPackets(millis());
+    }
+    return false;
+}
 
+/** @brief Synchronouse send and receive function. Exits once either answer is received or timeout occured enough times.
+ * 
+ * @param tries How many times to try to send and wait for answer
+ * @param timeout Timeout (ms) when waiting for answer
+ * @param destination Destionation to which to send the packet
+ * @param message_type Message type
+ * @param port Service port
+ * @param buffer Buffer containing data to be sent
+ * @param length Length of data
+ * @return 
+ */
+uint16_t sendAndReceive(uint8_t tries, uint32_t timeout, uint8_t destination, uint8_t message_type, uint8_t port, uint8_t *buffer, uint8_t length) {
+    uint16_t ret = 0;
+
+    for (int i = 0; i < tries; i++) {
+        ret = tm.buildPacket(&packet, destination, message_type, port, buffer, length);
+        IF_X_TRUE(ret, "Failed to build a packet: ", continue);
+
+        Serial.println("Sending packet:");
+        printPacket();
+        Serial.println("");
+
+        //transmit packet (save id before it gets garbled by SPI transaction)
+        uint32_t packet_id = tm.createPacketID(packet);
+        ret = lora_if.transmitData(packet.raw, TM_HEADER_LENGTH + packet.fields.data_len);
+        IF_X_TRUE(ret, "Failed to transmit data: ", continue);
+
+        //save packet id for "easy" answer checking
+        ret = tm.savePacketID(packet_id, millis());
+        IF_X_TRUE(ret, "Failed to save packet: ", {});
+
+        //start reception on lora
+        ret = lora_if.startReception();
+        IF_X_TRUE(ret, "Failed to start reception: ", continue);
+
+
+        //wait for response
+        auto timer = millis();
+        while (millis() - timer < timeout) {
+            //got some data
+            if (digitalRead(DIO0)) {
+                //get data from lora
+                uint8_t len;
+                ret = lora_if.getData(packet.raw, &len);
+                IF_X_TRUE(ret, "Failed to get data: ", continue);
+                
+                //check if packet is valid
+                ret = tm.checkHeader(packet);
+                IF_X_TRUE(ret, "Incoming packet header bad: ", continue);
+                
+                //check packet if it is answer
+                ret = tm.checkPacket(packet);
+                IF_X_TRUE(ret, "Incoming packet not answer: ", continue);
+
+                //save received packet
+                ret = tm.savePacket(packet, millis());
+                IF_X_TRUE(ret, "Failed to save packet: ", {});
+                Serial.println("Got answer:");
+                return ret;
+            }
+
+            //clear saved packets in the meantime
+            tm.clearSavedPackets(millis());
+        }
+
+        Serial.println("timeout");
+    }
+
+    return ret;
+}
+
+void handleAnswer() {
+    if (packet.fields.msg_type == TM_MSG_OK) {
+        Serial.println("OK Answer:");
+        printPacket();
+        return;
+    }
+
+    if (packet.fields.msg_type == TM_MSG_ERR) {
+        Serial.println("ERR Answer:");
+        printPacket();
+        return;
+    }
+}
 
 void setup() {
     Serial.begin(9600);
@@ -130,61 +248,22 @@ void setup() {
 
     //TM init
     tm.setSeed(46290);
-    tm.addPort(16, TM_PORT_IN | TM_PORT_DATA_NONE);
+    tm.addPort(S_PORT, TM_PORT_IN | TM_PORT_DATA_NONE);
 
-    //try to register
-    bool registered = false;
-    for (int i = 0; i < 3; i++) {
-        Serial.println("Registering: ");
+    //1. register
+    ret = sendAndReceive(3, TM_TIME_TO_STALE, TM_BROADCAST_ADDRESS, TM_MSG_REGISTER, 0, nullptr, 0);
+    IF_X_TRUE(ret, "Failed to register: ", failed());
 
-        tm.buildPacket(&packet, 255, TM_MSG_REGISTER);
-        printPacket(packet);
+    //save data from registration
+    tm.clearSavedPackets(millis());
+    tm.setAddress(packet.fields.data[0]);
+    tm.setGatewayAddress(packet.fields.src_addr);
 
-        ret = lora_if.transmitData(packet.raw, TM_HEADER_LENGTH);
-        IF_X_TRUE(ret, "Failed to transmit data: ", failed());
-
-        ret = tm.savePacket(packet, millis());
-        IF_X_TRUE(ret, "Failed to save packet: ", {});
-
-        ret = lora_if.startReception();
-        IF_X_TRUE(ret, "Failed to start reception: ", failed());
-
-        auto timer = millis();
-        while (millis() - timer < 3000 && !digitalRead(DIO0)) {
-            //TODO more logic
-            //if packet is a broadcast, ignore it and keep waiting for our response
-            //wait for response, not just any packet
-        }
-
-        if (!lora_if.hasData()) {
-            Serial.println("timeout");
-            continue;
-        }
-
-        uint8_t len;
-        ret = lora_if.getData(packet.raw, &len);
-        IF_X_TRUE(ret, "Failed to get data: ", continue);
-
-        printPacket(packet);
-
-        ret = tm.checkHeader(packet);
-        IF_X_TRUE(ret, "Incoming packet header bad: ", continue);
-
-        ret = tm.checkPacket(packet);
-        IF_X_TRUE(ret, "Incoming packet not answer: ", continue);
-
-        Serial.println("success");
-
-        //address should be the only data
-        tm.setAddress(packet.fields.data[0]);
-        registered = true;
-        break;
-    }
-    if (!registered)
-        failed();
-
-    //port anouncement
-
+    //2. tell gateway our ports
+    uint8_t buf[2] = {S_PORT, TM_PORT_IN | TM_PORT_DATA_NONE};
+    ret = sendAndReceive(3, TM_TIME_TO_STALE, tm.getGatewayAddress(), TM_MSG_PORT_ANOUNCEMENT, 0, buf, 2);
+    IF_X_TRUE(ret, "Failed to send port anouncement: ", failed());
+    
 
     digitalWrite(STATUS_LED, LOW);
 }

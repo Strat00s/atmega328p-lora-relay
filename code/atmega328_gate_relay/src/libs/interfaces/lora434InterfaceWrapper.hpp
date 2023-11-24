@@ -15,9 +15,9 @@ public:
         this->lora = lora;
     }
 
-    /** @brief 
+    /** @brief Transmit data on underlying LORA device.
      * 
-     * @param data Data to send/transmit.
+     * @param data Data to send/transmit. They will be overwritten by "junk" since the same buffer is used to save returned SPI transaction data.
      * @param len Length of data to be transmitted.
      * @return 0 on success, LORA ERR_... defines on error.
      */
@@ -45,7 +45,9 @@ public:
         lora->readData(buf);
         *len = lora->getPayloadLength();
         lora->clearIrqFlags();
-        
+
+        lora->receiveContinuous();
+
         return ret;
     }
 
@@ -62,7 +64,12 @@ public:
      * 
      */
     uint8_t hasData() {
-        uint8_t tmp = lora->readRegister(REG_IRQ_FLAGS) & IRQ_FLAG_RX_DONE;
+        return lora->readRegister(REG_IRQ_FLAGS) & IRQ_FLAG_RX_DONE;
+    }
+
+    uint8_t clearIRQ() {
+        uint8_t tmp = lora->readRegister(REG_IRQ_FLAGS);
+        lora->clearIrqFlags();
         return tmp;
     }
 };

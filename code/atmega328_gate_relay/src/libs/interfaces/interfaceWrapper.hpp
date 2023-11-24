@@ -36,4 +36,5 @@ public:
     virtual uint8_t getData(uint8_t *data, uint8_t *len) = 0;
     virtual uint8_t startReception() = 0;
     virtual uint8_t hasData() = 0;
+    virtual uint8_t clearIRQ() = 0;
 };

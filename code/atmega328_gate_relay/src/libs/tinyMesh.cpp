@@ -69,7 +69,7 @@ uint8_t TinyMesh::getAddress() {
 }
 
 uint8_t TinyMesh::getGatewayAddress() {
-    return this->address;
+    return this->gateway;
 }
 
 uint8_t TinyMesh::getDeviceType() {
@@ -247,7 +247,8 @@ uint16_t TinyMesh::checkHeader(packet_t packet) {
 
 uint8_t TinyMesh::savePacketID(uint32_t packet_id, uint32_t time, bool force) {
     if (millis != nullptr && !time)
-        time = millis() + TM_TIME_TO_STALE;
+        time = millis();
+    time += TM_TIME_TO_STALE;
 
     if (sent_cnt >= TM_SENT_Q_SIZE) {
         //if full and force, just shift everything
@@ -264,10 +265,6 @@ uint8_t TinyMesh::savePacketID(uint32_t packet_id, uint32_t time, bool force) {
     for (int i = 0; i < TM_SENT_Q_SIZE; i++) {
         if (sent_packets[i] == 0) {
             sent_packets[i] = ((uint64_t)time) << 32 | packet_id;
-            Serial.println("Saved packet: ");
-            Serial.println((uint16_t)(sent_packets[i] >> 16));
-            Serial.println((uint8_t)(sent_packets[i] >> 8));
-            Serial.println((uint8_t)(sent_packets[i]));
             break;
         }
     }
@@ -329,16 +326,7 @@ uint8_t TinyMesh::checkPacket(packet_t packet) {
 
     //check if packet is a response to our previous request
     packet_id = createPacketID(getMessageId(packet) - 1, packet.fields.dst_addr, packet.fields.src_addr);
-    Serial.println("ID to find: ");
-    Serial.println((uint16_t)(packet_id >> 16));
-    Serial.println((uint8_t)(packet_id >> 8));
-    Serial.println((uint8_t)(packet_id));
     for (int i = 0; i < TM_SENT_Q_SIZE; i++) {
-            Serial.println("Stored packet: ");
-            Serial.println((uint16_t)(sent_packets[i] >> 16));
-            Serial.println((uint8_t)(sent_packets[i] >> 8));
-            Serial.println((uint8_t)(sent_packets[i]));
-        
         //answer to request
         if (packet_id == (uint32_t)sent_packets[i] || packet_id >> 8 == ((uint32_t)sent_packets[i]) >> 8) {
             //check for valid port
