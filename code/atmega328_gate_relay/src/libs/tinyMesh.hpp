@@ -1,8 +1,6 @@
 #pragma once
 #include <stdint.h>
 
-//TODO set mode without gateway
-
 //get data
 //build packet
 //check packet
@@ -73,16 +71,6 @@ Only custom messages are allowed to have flow of any size (continuous request, r
         PORT NUMBER         0
         MESSAGE TYPE        REGISTER
         DATA LENGTH         0
-    //Device config
-    //    VERSION             1
-    //    DEVICE TYPE         G
-    //    MESSAGE ID          n+1
-    //    SOURCE ADDRESS      GATREWAY_ADDRESS
-    //    DESTINATION ADDRESS 0
-    //    PORT NUMBER         0
-    //    MESSAGE TYPE        CONFIG
-    //    DATA LENGTH         1
-    //    DATA...             DEVICE_ADDRESS
     TODO Request
         VERSION
         DEVICE TYPE
@@ -103,7 +91,7 @@ Only custom messages are allowed to have flow of any size (continuous request, r
         MESSAGE TYPE
         DATA LENGTH
         DATA...
-    Port advertisement
+    Port anouncement
         VERSION             1
         DEVICE TYPE         x
         MESSAGE ID          n
@@ -117,19 +105,6 @@ Only custom messages are allowed to have flow of any size (continuous request, r
             DATA_TYPE 8b
                 PORT DIR  0bxx000000
                 DATA TYPE 0b00xxxxxx
-    Route solicitation
-        VERSION             1
-        DEVICE TYPE         G
-        MESSAGE ID          n
-        SOURCE ADDRESS      x
-        DESTINATION ADDRESS y
-        PORT NUMBER         0
-        MESSAGE TYPE        ROUTE_SOLICITATION
-        DATA LENGTH         2 + l
-        DATA...             LISTENER_ADDRESS, PORT and l extra PORTs
-            LISTENER_ADDRESS 8b
-            LISTEN_PORT      8b
-            EXTRA_PORTS      8b * l
     Route anouncement
         VERSION             1
         DEVICE TYPE         x
@@ -162,7 +137,7 @@ Only custom messages are allowed to have flow of any size (continuous request, r
         MESSAGE TYPE        STATUS
         DATA LENGTH         l
         DATA...             string of size l
-    Combined
+    //TODO Combined
         VERSION             1
         DEVICE TYPE         x
         MESSAGE ID          n
@@ -191,19 +166,16 @@ Only custom messages are allowed to have flow of any size (continuous request, r
 
 #define TM_VERSION 1
 
-//PACKET SIZES
+//PACKET PART SIZES
 #define TM_HEADER_LENGTH 9
 #define TM_DATA_LENGTH   256 - TM_HEADER_LENGTH
 
 //RETURN FLAGS
 #define TM_OK                   0b0000000000000000
-
 #define TM_ERR_NULL             0b0000000000000001 //packet is null or given buffer is null
 #define TM_ERR_HEADER_LEN       0b0000000000000010 //invalid header length
 #define TM_ERR_TRUNCATED        0b0000000000000100 //data truncated during copying (probably buffer length)
-
 #define TM_ERR_VERSION          0b0000000000001000 //invalid version in header
-//#define TM_ERR_MSG_ID           0b0000000000010000 //TODO NOT USED
 #define TM_ERR_DEVICE_TYPE      0b0000000000100000 //unknown device type in header
 #define TM_ERR_SOURCE_ADDR      0b0000000001000000 //invalid source address in header
 #define TM_ERR_DATA_LEN         0b0000000010000000 //invalid data length in header
@@ -211,20 +183,21 @@ Only custom messages are allowed to have flow of any size (continuous request, r
 #define TM_ERR_MSG_TYPE_PORT    0b0000001000000000 //invalid message type and port combination
 #define TM_ERR_MSG_TYPE_ADDRESS 0b0000010000000000 //invalid message type and address combination
 #define TM_ERR_MSG_TYPE_LEN     0b0000100000000000 //invalid message type and length combination
-//#define TM_ERR_DATA_NULL        0b0001000000000000 //data to be copied are null
 
 //TM_ERR_MESSAGES 
 #define TM_SERVICE_NOT_IMPLEMENTED 1
+#define TM_ERR_ADDRESS_LIMIT       2
+#define TM_ERR_UNKNOWN_NODE        3
 
 //#define TM_ERR_CFG_ADDRESS      0b0010000000000000
 
 #define TM_IN_ANSWER        0 //OK, ERR and custom are the only valid responses
-#define TM_IN_REQUEST       1 //packet is a request
-#define TM_IN_BROADCAST     2 //packet is a broadcast -> don't answer, handle and forward
-#define TM_ERR_IN_ANSWER    3 //packet is an answer, but we did not make any requests
-#define TM_ERR_IN_TYPE      4 //incoming packet is a response but is not OK or ERR or custom
-#define TM_ERR_IN_PORT      5 //incoming packet is for us but port is not registed
-#define TM_ERR_IN_FORWARD   6 //incoming packet is not for us and is to be forwarded
+#define TM_IN_REQUEST       1 //packet is a request (anything but OK and ERR)
+#define TM_IN_BROADCAST     2 //packet is a broadcast -> handle (, answer) and forward
+#define TM_IN_FORWARD       3 //incoming packet is not for us and is to be forwarded
+#define TM_ERR_IN_ANSWER    4 //packet is an answer, but we did not make any requests
+#define TM_ERR_IN_TYPE      5 //incoming packet is a response but is not OK or ERR or custom
+#define TM_ERR_IN_PORT      6 //incoming packet is for us but port is not registed
 #define TM_ERR_IN_DUPLICATE 7 //incoming packet is probably a diplicate
 
 #define TM_ERR_PORT_COUNT 1
@@ -232,21 +205,17 @@ Only custom messages are allowed to have flow of any size (continuous request, r
 
 /*----(MESSAGE TYPES)----*/
 //response
-#define TM_MSG_OK            0 //ok erponse
-#define TM_MSG_ERR           1 //error response
-
+#define TM_MSG_OK                0 //ok erponse
+#define TM_MSG_ERR               1 //error response
 //request
-#define TM_MSG_PING          2  //ping device
-#define TM_MSG_REGISTER      3  //register to the newtwork
-//#define TM_MSG_DEVICE_CONFIG 4  //send device configuration back
-#define TM_MSG_PORT_ADVERT   4  //advertise custom port for listening/accepting data on
-#define TM_MSG_PORT_ANOUNCEMENT 4
-#define TM_MSG_ROUTE_SOLICIT 5  //when user manually routes ports and addresses, send this to output node
-#define TM_MSG_ROUTE_ANOUNC  6  //anounc already known routes
-#define TM_MSG_RESET         7  //request a device configuration reset
-#define TM_MSG_STATUS        8  //RAW string
-#define TM_MSG_COMBINED      9  //data contain multiple messages in format |TYPE|LEN|DATA|TYPE...
-#define TM_MSG_CUSTOM        10 //send custom data (to some port)
+#define TM_MSG_PING              2  //ping device
+#define TM_MSG_REGISTER          3  //register to the newtwork
+#define TM_MSG_PORT_ANOUNCEMENT  4  //anounce what ports a NODE is using
+#define TM_MSG_ROUTE_ANOUNCEMENT 6  //anounc already known routes
+#define TM_MSG_RESET             7  //request a device configuration reset
+#define TM_MSG_STATUS            8  //RAW string
+#define TM_MSG_COMBINED          9  //data contain multiple messages in format |TYPE|LEN|DATA|TYPE...
+#define TM_MSG_CUSTOM            10 //send custom data (to some port)
 
 //PORT DATA TYPES
 #define TM_PORT_DATA_NONE   0 //port has no defined data type (empty payload)
@@ -267,31 +236,14 @@ Only custom messages are allowed to have flow of any size (continuous request, r
 #define TM_TYPE_LP_NODE 2 //device is a low power node
 
 
-#define TM_POS_VERSION  0 //position of version byte in header
-#define TM_POS_DEV_TYPE 1 //position of device tpye byte in header
-#define TM_POS_MSG_ID_M 2 //position of MSB of message ID byte in header
-#define TM_POS_MSG_ID_L 3 //position of LSB if message ID byte in header
-#define TM_POS_SRC_ADDR 4 //possition of source address byte in header
-#define TM_POS_DST_ADDR 5 //position of destination address byte in header
-#define TM_POS_PORT     6 //position of port byte in header
-#define TM_POS_MSG_TYPE 7 //position of message type byte in header
-#define TM_POS_DATA_LEN 8 //position of data length byte in header
-
-
 //DEFAULT CONFIG
 #define TM_DEFAULT_ADDRESS   0
 #define TM_BROADCAST_ADDRESS 255
 #define TM_DEFAULT_PORT      0
 
-#ifndef TM_TIME_TO_STALE
 #define TM_TIME_TO_STALE     3000 //time in ms for a saved packet to become stale
-#endif
-#ifndef TM_PORT_COUNT
 #define TM_PORT_COUNT        2 //how manny ports to store (minimum 1)
-#endif
-#ifndef TM_SENT_Q_SIZE
 #define TM_SENT_Q_SIZE       5 //this array is of type uint64_t, so it takes a lot of space!
-#endif
 
 
 typedef union{
@@ -328,14 +280,14 @@ typedef struct {
 
 class TinyMesh {
 private:
-    uint8_t version   = TM_VERSION; //supported TM version
-    uint8_t address   = 0;  //this NODE address
-    uint8_t gateway   = 0;  //gateway address
-    uint8_t node_type = 0;  //this NODE type
-    uint8_t sent_cnt  = 0;  //current number of saved sent packets
-    uint8_t port_cnt  = 0;  //current number of saved ports
+    uint8_t version   = TM_VERSION; //supported TinyMesh version
+    uint8_t address   = 0;          //this NODE address
+    uint8_t gateway   = 255;        //gateway address
+    uint8_t node_type = 0;          //this NODE type
+    uint8_t sent_cnt  = 0;          //current number of saved sent packets
+    uint8_t port_cnt  = 0;          //current number of saved ports
     uint64_t sent_packets[TM_SENT_Q_SIZE] = {0};
-    port_cfg_t ports[TM_PORT_COUNT]       = {0};
+    port_cfg_t ports[TM_PORT_COUNT]       = {0}; //TODO use it (add, remove, get, set,...)
 
 
     uint16_t lcg(uint16_t seed = 0);
