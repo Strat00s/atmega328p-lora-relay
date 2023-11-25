@@ -136,6 +136,28 @@ bool waitForAnswer(packet_t *packet, unsigned long timeout) {
     return false;
 }
 
+uint16_t getInterfaceData() {
+    //get data from lora
+    uint8_t len;
+    uint16_t ret = 0;
+    ret = lora_if.getData(packet.raw, &len);
+    IF_X_TRUE(ret, "Failed to get data: ", return ret);
+    
+    //check if packet is valid
+    ret = tm.checkHeader(packet);
+    IF_X_TRUE(ret, "Incoming packet header bad: ", return ret);
+    
+    //check packet if it is answer
+    ret = tm.checkPacket(packet);
+    IF_X_TRUE(ret, "Incoming packet not answer: ", return ret);
+
+    //save received packet
+    ret = tm.savePacket(packet, millis());
+    IF_X_TRUE(ret, "Failed to save packet: ", {});
+    Serial.println("Got answer:");
+    return ret;
+}
+
 /** @brief Synchronouse send and receive function. Exits once either answer is received or timeout occured enough times.
  * 
  * @param tries How many times to try to send and wait for answer
@@ -177,23 +199,8 @@ uint16_t sendAndReceive(uint8_t tries, uint32_t timeout, uint8_t destination, ui
         while (millis() - timer < timeout) {
             //got some data
             if (digitalRead(DIO0)) {
-                //get data from lora
-                uint8_t len;
-                ret = lora_if.getData(packet.raw, &len);
-                IF_X_TRUE(ret, "Failed to get data: ", continue);
-                
-                //check if packet is valid
-                ret = tm.checkHeader(packet);
-                IF_X_TRUE(ret, "Incoming packet header bad: ", continue);
-                
-                //check packet if it is answer
-                ret = tm.checkPacket(packet);
-                IF_X_TRUE(ret, "Incoming packet not answer: ", continue);
-
-                //save received packet
-                ret = tm.savePacket(packet, millis());
-                IF_X_TRUE(ret, "Failed to save packet: ", {});
-                Serial.println("Got answer:");
+                ret = getInterfaceData();
+                IF_X_TRUE(ret, "Failed to get data on interface: ", continue);
                 return ret;
             }
 
@@ -269,25 +276,19 @@ void setup() {
 }
 
 
-auto send_timer = millis();
+//auto status_timer = millis();
+uint16_t ret = 0;
 void loop() {
     status(0);
 
-    if (millis() - send_timer > 2000) {
-        send_timer = millis();
-        auto ret = tm.buildPacket(&packet, 255, TM_MSG_REGISTER);
-        if (ret) {
-            Serial.print("Failed to build packet: ");
-            Serial.println(ret, 2);
-        }
-        else {
-            ret = 0;
-            ret = lora.transmit(packet.raw, packet.fields.data_len + TM_HEADER_LENGTH);
-            if (!(ret & IRQ_FLAG_TX_DONE)) {
-                Serial.print("Failed to send data: ");
-                Serial.println(ret, 2);
-            }
-        }
-    }
+    //if (digitalRead(DIO0)) {
+//
+    //}
+
+    //if (millis() - status_timer > 15000) {
+    //    //TODO send status
+    //    ret = getInterfaceData();
+    //    IF_X_TRUE(ret, "Failed to get data: ", {});
+    //}
 }
 
