@@ -216,6 +216,7 @@ Only custom messages are allowed to have flow of any size (continuous request, r
 #define TM_MSG_STATUS            8  //RAW string
 #define TM_MSG_COMBINED          9  //data contain multiple messages in format |TYPE|LEN|DATA|TYPE...
 #define TM_MSG_CUSTOM            10 //send custom data (to some port)
+#define TM_MSG_MAX               11
 
 //PORT DATA TYPES
 #define TM_PORT_DATA_NONE   0 //port has no defined data type (empty payload)
@@ -234,6 +235,7 @@ Only custom messages are allowed to have flow of any size (continuous request, r
 #define TM_TYPE_GATEWAY 0 //device is a gateway
 #define TM_TYPE_NODE    1 //device is a normal node
 #define TM_TYPE_LP_NODE 2 //device is a low power node
+#define TM_TYPE_MAX     3
 
 
 //DEFAULT CONFIG
@@ -280,14 +282,14 @@ typedef struct {
 
 class TinyMesh {
 private:
-    uint8_t version   = TM_VERSION; //supported TinyMesh version
-    uint8_t address   = 0;          //this NODE address
-    uint8_t gateway   = 255;        //gateway address
-    uint8_t node_type = 0;          //this NODE type
-    uint8_t sent_cnt  = 0;          //current number of saved sent packets
-    uint8_t port_cnt  = 0;          //current number of saved ports
+    uint8_t version                       = TM_VERSION;           //supported TinyMesh version
+    uint8_t address                       = TM_DEFAULT_ADDRESS;   //this NODE address
+    uint8_t gateway                       = TM_BROADCAST_ADDRESS; //gateway address
+    uint8_t node_type                     = TM_TYPE_NODE;         //this NODE type
+    uint8_t sent_cnt                      = 0;                    //current number of saved sent packets
+    uint8_t port_cnt                      = 0;                    //current number of saved ports
     uint64_t sent_packets[TM_SENT_Q_SIZE] = {0};
-    port_cfg_t ports[TM_PORT_COUNT]       = {0}; //TODO use it (add, remove, get, set,...)
+    port_cfg_t ports[TM_PORT_COUNT]       = {{TM_DEFAULT_PORT, TM_PORT_INOUT | TM_PORT_DATA_CUSTOM}}; //TODO use it (add, remove, get, set,...)
 
 
     uint16_t lcg(uint16_t seed = 0);
@@ -304,20 +306,20 @@ public:
 
     /** @brief Create TinyMesh instance.
      * The class containes a simple LCG for pseudo random message ID generation where the seed is used.
-     * @param address Node address
      * @param node_type Node type
+     * @param address Node address
      * @param seed Starting seed for LCG
      */
-    TinyMesh(uint8_t address, uint8_t node_type);
+    TinyMesh(uint8_t node_type, uint8_t address);
 
     /** @brief Create TinyMesh instance.
      * The class containes a simple LCG for pseudo random message ID generation where the seed is used.
+     * @param node_type Node type
      * @param version Protocol version to be supported
      * @param address Node address
-     * @param node_type Node type
      * @param seed Starting seed for LCG
      */
-    TinyMesh(uint8_t version, uint8_t address, uint8_t node_type);
+    TinyMesh(uint8_t node_type, uint8_t address, uint8_t version);
     ~TinyMesh();
 
 
@@ -372,7 +374,28 @@ public:
      */
     uint16_t getMessageId(packet_t packet);
 
-    uint8_t addPort(uint8_t port, uint8_t type);
+
+    /** @brief Change port type or if port does not exist, create it
+     * 
+     * @param port Port number
+     * @param type Port type
+     * @return TM_OK on succesful change or creation, TM_ERR_PORT_COUNT when there is not enough space to create new port.
+     */
+    uint8_t setPort(uint8_t port, uint8_t type);
+
+    /** @brief Get copy of a port
+     * 
+     * @param port Port to search for
+     * @return port_cfg_t - Found port on success, {0, 0} on failure.
+     */
+    port_cfg_t getPort(uint8_t port);
+    
+    /** @brief Remove port
+     * 
+     * @param port Port number
+     * @return port_cfg_t - Found port on success, {0, 0} on failure.
+     */
+    port_cfg_t removePort(uint8_t port);
 
     /** @brief Build packet from a buffer.
      * 

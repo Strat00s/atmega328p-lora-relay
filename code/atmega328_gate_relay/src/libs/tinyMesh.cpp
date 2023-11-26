@@ -1,18 +1,16 @@
 #include "tinyMesh.hpp"
 #include <string.h>
-#include <Arduino.h>
 
 
 TinyMesh::TinyMesh(uint8_t node_type) {
     setDeviceType(node_type);
-    addPort(0, TM_PORT_INOUT);
 }
 
-TinyMesh::TinyMesh(uint8_t address, uint8_t node_type) : TinyMesh(node_type) {
+TinyMesh::TinyMesh(uint8_t node_type, uint8_t address) : TinyMesh(node_type) {
     setAddress(address);
 }
 
-TinyMesh::TinyMesh(uint8_t version, uint8_t address, uint8_t node_type) : TinyMesh(address, node_type) {
+TinyMesh::TinyMesh(uint8_t node_type, uint8_t address, uint8_t version) : TinyMesh(address, node_type) {
     setVersion(version);
 }
 
@@ -57,7 +55,7 @@ void TinyMesh::setDeviceType(uint8_t node_type) {
 
 void TinyMesh::setMessageId(packet_t *packet, uint16_t msg_id) {
     packet->fields.msg_id_msb = msg_id >> 8;
-    packet->fields.msg_id_lsb = msg_id & 0xFF;
+    packet->fields.msg_id_lsb = msg_id;
 }
 
 uint8_t TinyMesh::getVersion() {
@@ -81,15 +79,46 @@ uint16_t TinyMesh::getMessageId(packet_t packet) {
 }
 
 
-uint8_t TinyMesh::addPort(uint8_t port, uint8_t type) {
-    if (this->port_cnt >= TM_PORT_COUNT)
-        return TM_ERR_PORT_COUNT;
-    
-    this->ports[this->port_cnt] = {port, type};
-    this->port_cnt++;
+uint8_t TinyMesh::setPort(uint8_t port, uint8_t type) {
+    //find port and change type
+    for (size_t i = 0; i < TM_PORT_COUNT; i++) {
+        if (this->ports[i].port == port) {
+            this->ports[i].type = type;
+            return TM_OK;
+        }
+    }
 
-    return TM_OK;
+    //port does not exist -> create it
+    for (size_t i = 0; i < TM_PORT_COUNT; i++) {
+        if (this->ports[i].port == 0 && this->ports[i].type == 0) {
+            this->ports[i] = {port, type};
+            return TM_OK;
+        }
+    }
+
+    //not enough space to create new port
+    return TM_ERR_PORT_COUNT;
 }
+
+port_cfg_t TinyMesh::getPort(uint8_t port) {
+    for (size_t i = 0; i < TM_PORT_COUNT; i++) {
+        if (this->ports[i].port == port)
+            return this->ports[i];
+    }
+    return {0, 0};
+}
+
+port_cfg_t TinyMesh::removePort(uint8_t port) {
+    for (size_t i = 0; i < TM_PORT_COUNT; i++) {
+        if (this->ports[i].port == port) {
+            port_cfg_t tmp = this->ports[i];
+            this->ports[i] = {0, 0};
+            return tmp;
+        }
+    }
+    return {0, 0};
+}
+
 
 
 uint16_t TinyMesh::buildPacket(packet_t *packet, uint8_t *buffer, uint8_t length) {
@@ -183,7 +212,7 @@ uint16_t TinyMesh::checkHeader(packet_t packet) {
         ret |= TM_ERR_VERSION;
 
     //unknown device type
-    if (packet.fields.node_type > TM_TYPE_LP_NODE)
+    if (packet.fields.node_type >= TM_TYPE_MAX)
         ret |= TM_ERR_DEVICE_TYPE;
 
     //invalid message id
@@ -195,7 +224,7 @@ uint16_t TinyMesh::checkHeader(packet_t packet) {
         ret |= TM_ERR_SOURCE_ADDR;
 
     //unknown message type
-    if (packet.fields.msg_type > TM_MSG_CUSTOM)
+    if (packet.fields.msg_type >= TM_MSG_MAX)
         ret |= TM_ERR_MSG_TYPE;
 
     //custom and port 0, predefined and port other than 0
@@ -210,10 +239,6 @@ uint16_t TinyMesh::checkHeader(packet_t packet) {
     //message type, address and data length invalid combinations
     switch (packet.fields.msg_type) {
         case TM_MSG_REGISTER:
-            //TODO allow registration with premade address
-            if (packet.fields.src_addr != 0 || packet.fields.dst_addr != 255)
-                ret |= TM_ERR_MSG_TYPE_ADDRESS;
-            [[fallthrough]];
         case TM_MSG_PING:
         case TM_MSG_RESET:
             if (packet.fields.data_len != 0)

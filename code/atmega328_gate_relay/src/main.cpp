@@ -128,19 +128,8 @@ void handleIncomingAnswer() {
     }
 }
 
-/** @brief Tries to: build a packet, send it and save it's ID 
- * 
- * @param destination 
- * @param message_type 
- * @param port 
- * @param buffer 
- * @param length 
- * @return 
- */
-uint16_t sendPacketOnInterface(uint8_t destination, uint8_t message_type, uint8_t port = 0, uint8_t *buffer = nullptr, uint8_t length = 0) {
+uint16_t sendPacketOnInterface() {
     uint16_t ret = 0;
-    ret = tm.buildPacket(&packet, destination, message_type, port, buffer, length);
-    IF_X_TRUE(ret, "Failed to build packet: ", return ret);
 
     Serial.println("Sending packet:");
     printPacket();
@@ -160,13 +149,26 @@ void handleIncomingRequest() {
     uint16_t ret = 0;
     if (packet.fields.msg_type == TM_MSG_CUSTOM) {
         IF_X_TRUE(packet.fields.port != S_PORT, "Unknown service: ", return);
-        //TODO handle our service
+
         Serial.println("Our service not implemented");
+
+        uint8_t buf = TM_SERVICE_NOT_IMPLEMENTED;
+        ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_ERR, tm.getMessageId(packet) + 1, 0, &buf, 1);
+        IF_X_TRUE(ret, "Failed to build packet: ", return);
+
+        sendPacketOnInterface();
+
+        digitalWrite(STATUS_LED, HIGH);
+        delay(1000);
+        digitalWrite(STATUS_LED, LOW);
         return;
     }
 
     if (packet.fields.msg_type == TM_MSG_PING) {
-        sendPacketOnInterface(packet.fields.src_addr, TM_MSG_OK);
+        ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_OK);
+        IF_X_TRUE(ret, "Failed to build packet: ", return);
+
+        sendPacketOnInterface();
         return;
     }
 
@@ -179,13 +181,19 @@ void handleIncomingRequest() {
 
     Serial.print("Unhandled request type:");
     Serial.println(packet.fields.msg_type);
-    sendPacketOnInterface(packet.fields.src_addr, TM_MSG_ERR, TM_SERVICE_NOT_IMPLEMENTED);
+    uint8_t buf = TM_SERVICE_NOT_IMPLEMENTED;
+    ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_ERR, 0, &buf, 1);
+    IF_X_TRUE(ret, "Failed to build packet: ", return);
+
+    sendPacketOnInterface();
 }
 
 //TODO save interfaces or forward = broadcast
 void forwardPacket() {
     Serial.println("Forwarding packet");
-    sendPacketOnInterface(packet.fields.dst_addr, packet.fields.msg_type, packet.fields.port, packet.fields.data, packet.fields.data_len);
+    //uint16_t ret = tm.buildPacket(&packet, packet.fields.dst_addr, packet.fields.msg_type, packet.fields.port, packet.fields.data, packet.fields.data_len);
+    //IF_X_TRUE(ret, "Failed to build packet: ", return);
+    sendPacketOnInterface();
 }
 
 
@@ -218,8 +226,10 @@ uint16_t requestAwaitAnswer(uint8_t tries, uint32_t timeout, uint8_t destination
     uint16_t ret = 0;
 
     for (int i = 0; i < tries; i++) {
-        ret = sendPacketOnInterface(destination, message_type, port, buffer, length);
-        IF_X_TRUE(ret, "Failed to send packet: ", continue);
+        ret = tm.buildPacket(&packet, destination, message_type, port, buffer, length);
+        IF_X_TRUE(ret, "Failed to build packet: ", continue);
+
+        sendPacketOnInterface();
 
         //start reception on lora
         ret = lora_if.startReception();
@@ -280,16 +290,17 @@ void setup() {
 
     //TM init
     tm.setSeed(46290);
-    tm.addPort(S_PORT, TM_PORT_IN | TM_PORT_DATA_NONE);
+    tm.setPort(S_PORT, TM_PORT_IN | TM_PORT_DATA_NONE);
+    tm.setAddress(46);
 
     //1. register
-    ret = requestAwaitAnswer(3, TM_TIME_TO_STALE, TM_BROADCAST_ADDRESS, TM_MSG_REGISTER, 0, nullptr, 0);
+    ret = requestAwaitAnswer(3, TM_TIME_TO_STALE, tm.getGatewayAddress(), TM_MSG_REGISTER, 0, nullptr, 0);
     IF_X_TRUE(ret, "Failed to register: ", failed());
     Serial.println("Registered successfully");
 
     //save data from registration
     tm.clearSavedPackets(millis());
-    tm.setAddress(packet.fields.data[0]);
+    //tm.setAddress(packet.fields.data[0]);
     tm.setGatewayAddress(packet.fields.src_addr);
 
     //2. tell gateway our ports
@@ -306,13 +317,13 @@ auto status_timer = millis();
 void loop() {
     uint16_t ret = 0;
 
-    if (millis() - status_timer > 5000) {
-        status_timer = millis();
-        uint8_t msg[] = "ALIVE";
-        sendPacketOnInterface(tm.getGatewayAddress(), TM_MSG_STATUS, 0, msg, 5);
-    }
+    //if (millis() - status_timer > 7000) {
+    //    status_timer = millis();
+    //    uint8_t msg[] = "ALIVE";
+    //    sendPacketOnInterface(tm.getGatewayAddress(), TM_MSG_STATUS, 0, msg, 5);
+    //}
 
-    status(0);
+    //status(0);
 
     if (digitalRead(DIO0)) {
         ret = getPacketOnInterface();
@@ -323,6 +334,9 @@ void loop() {
         IF_X_TRUE(ret == TM_ERR_IN_TYPE,      "Incoming packet has wrong type", return);
         IF_X_TRUE(ret == TM_ERR_IN_PORT,      "Incoming packet has wrong port", return);
         IF_X_TRUE(ret == TM_ERR_IN_DUPLICATE, "Incoming packet is a duplicate", return);
+
+        //save received packet
+        IF_X_TRUE(tm.savePacket(packet, millis()), "Failed to save packet: ", {});
 
         if (ret == TM_IN_ANSWER) {
             handleIncomingAnswer();
@@ -338,8 +352,7 @@ void loop() {
             forwardPacket();
         }
 
-        //save received packet
-        IF_X_TRUE(tm.savePacket(packet, millis()), "Failed to save packet: ", {});
+        lora_if.startReception();
     }
 
     ret = tm.clearSavedPackets(millis());
