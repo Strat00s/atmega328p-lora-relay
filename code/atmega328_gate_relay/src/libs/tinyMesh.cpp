@@ -1,3 +1,13 @@
+/** @file tinyMesh.cpp
+ * @author Lukáš Baštýř (l.bastyr@seznam.cz, 492875)
+ * @brief TinyMesh is a simple protocol for IoT devices.
+ * @version 0.1
+ * @date 27-11-2023
+ * 
+ * @copyright Copyright (c) 2023
+ * 
+ */
+
 #include "tinyMesh.hpp"
 #include <string.h>
 
@@ -79,19 +89,18 @@ uint16_t TinyMesh::getMessageId(packet_t packet) {
 }
 
 
-uint8_t TinyMesh::setPort(uint8_t port, uint8_t type) {
-    //find port and change type
+uint8_t TinyMesh::addPort(uint8_t port) {
+    //check if port exists
     for (size_t i = 0; i < TM_PORT_COUNT; i++) {
-        if (this->ports[i].port == port) {
-            this->ports[i].type = type;
-            return TM_OK;
+        if (this->ports[i] == port) {
+            return TM_ERR_PORT_EXISTS;
         }
     }
 
     //port does not exist -> create it
-    for (size_t i = 0; i < TM_PORT_COUNT; i++) {
-        if (this->ports[i].port == 0 && this->ports[i].type == 0) {
-            this->ports[i] = {port, type};
+    for (size_t i = 1; i < TM_PORT_COUNT; i++) {
+        if (this->ports[i] == 0) {
+            this->ports[i] = port;
             return TM_OK;
         }
     }
@@ -100,25 +109,26 @@ uint8_t TinyMesh::setPort(uint8_t port, uint8_t type) {
     return TM_ERR_PORT_COUNT;
 }
 
-port_cfg_t TinyMesh::getPort(uint8_t port) {
+bool TinyMesh::hasPort(uint8_t port) {
     for (size_t i = 0; i < TM_PORT_COUNT; i++) {
-        if (this->ports[i].port == port)
-            return this->ports[i];
+        if (this->ports[i] == port)
+            return true;
     }
-    return {0, 0};
+    return false;
 }
 
-port_cfg_t TinyMesh::removePort(uint8_t port) {
-    for (size_t i = 0; i < TM_PORT_COUNT; i++) {
-        if (this->ports[i].port == port) {
-            port_cfg_t tmp = this->ports[i];
-            this->ports[i] = {0, 0};
-            return tmp;
+uint8_t TinyMesh::removePort(uint8_t port) {
+    if (port == 0)
+        return TM_ERR_DEFAULT_PORT;
+
+    for (size_t i = 1; i < TM_PORT_COUNT; i++) {
+        if (this->ports[i] == port) {
+            this->ports[i] = 0;
+            return TM_OK;
         }
     }
-    return {0, 0};
+    return TM_ERR_PORT_DOESNT_EXIST;
 }
-
 
 
 uint16_t TinyMesh::buildPacket(packet_t *packet, uint8_t *buffer, uint8_t length) {
@@ -249,6 +259,15 @@ uint16_t TinyMesh::checkHeader(packet_t packet) {
             if (packet.fields.data_len != 1)
                 ret |= TM_ERR_MSG_TYPE_LEN;
             break;
+        case TM_MSG_PORT_ANOUNCEMENT:
+            if (packet.fields.data_len == 0)
+                ret |= TM_ERR_MSG_TYPE_LEN;
+            break;
+        //TODO v1.1
+        //case TM_MSG_ROUTE_ANOUNCEMENT:
+        //    if (packet.fields.data_len % 2 != 0)
+        //        ret |= TM_ERR_MSG_TYPE_LEN;
+        //    break;
         default: break;
     }
 
@@ -340,14 +359,7 @@ uint8_t TinyMesh::checkPacket(packet_t packet) {
         //answer to request
         if (packet_id == (uint32_t)sent_packets[i] || packet_id >> 8 == ((uint32_t)sent_packets[i]) >> 8) {
             //check for valid port
-            bool has_port = false;
-            for (int j = 0; j < TM_PORT_COUNT; j++) {
-                if (ports[j].port == packet.fields.port) {
-                    has_port = true;
-                    break;
-                }
-            }
-            if (!has_port)
+            if (!this->hasPort(packet.fields.port))
                 return TM_ERR_IN_PORT;
             
             //packet is a valid answer to our request
@@ -364,6 +376,8 @@ uint8_t TinyMesh::checkPacket(packet_t packet) {
 
     //packet is for us but is not a response -> new packet
     //user must save this packet manually
+    if (!this->hasPort(packet.fields.port))
+        return TM_ERR_IN_PORT;
     return TM_IN_REQUEST;
 }
 

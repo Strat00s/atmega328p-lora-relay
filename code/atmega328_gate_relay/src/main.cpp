@@ -15,7 +15,9 @@
 #define STATUS_LED PIN_PD2
 
 
-#define S_PORT 16 //our single service port
+#define SERVICE_PORT1 16
+#define SERVICE_PORT2 32
+#define SERVICE_PORT3 198
 
 /*----(FUNCTION MACROS)----*/
 #define IF_X_FALSE(x, msg, cmd) {if (x) {Serial.println(msg); cmd;}}
@@ -30,7 +32,6 @@ SX127X lora(CS, RST, DIO0);
 lora434InterfaceWrapper lora_if(&lora);
 
 packet_t packet;
-
 
 
 //SX127X callbacks
@@ -108,95 +109,54 @@ int freeRam () {
 }
 
 
+/** @brief Does not do much right now
+ * 
+ */
 void handleIncomingAnswer() {
     if (packet.fields.msg_type == TM_MSG_OK) {
-        Serial.println("OK Answer:");
-        printPacket();
+        Serial.println("OK Answer");
         return;
     }
 
     if (packet.fields.msg_type == TM_MSG_ERR) {
-        Serial.println("ERR Answer:");
-        printPacket();
+        Serial.println("ERR Answer");
         return;
     }
 
     if (packet.fields.msg_type == TM_MSG_CUSTOM) {
-        Serial.println("Custom Answer:");
-        printPacket();
+        Serial.println("Custom Answer");
         return;
     }
 }
 
-uint16_t sendPacketOnInterface() {
+
+/** @brief Send packet on our only interface and save it's ID
+ * 
+ * @return 0 on success, errors that occured during transmission
+ */
+uint16_t sendPacketOnInterface(bool save = true) {
     uint16_t ret = 0;
 
+    Serial.println("");
     Serial.println("Sending packet:");
     printPacket();
-    Serial.println("");
 
     uint32_t packet_id = tm.createPacketID(packet);
     ret = lora_if.transmitData(packet.raw, TM_HEADER_LENGTH + packet.fields.data_len);
     IF_X_TRUE(ret, "Failed to transmit data: ", return ret);
 
-    ret = tm.savePacketID(packet_id, millis());
-    IF_X_TRUE(ret, "Failed to save packet: ", {});
-    
+    if (save) {
+        IF_X_TRUE(tm.savePacketID(packet_id, millis()), "Failed to save packet: ", {});
+    }
+
     return ret;
 }
 
-void handleIncomingRequest() {
-    uint16_t ret = 0;
-    if (packet.fields.msg_type == TM_MSG_CUSTOM) {
-        IF_X_TRUE(packet.fields.port != S_PORT, "Unknown service: ", return);
 
-        Serial.println("Our service not implemented");
-
-        uint8_t buf = TM_SERVICE_NOT_IMPLEMENTED;
-        ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_ERR, tm.getMessageId(packet) + 1, 0, &buf, 1);
-        IF_X_TRUE(ret, "Failed to build packet: ", return);
-
-        sendPacketOnInterface();
-
-        digitalWrite(STATUS_LED, HIGH);
-        delay(1000);
-        digitalWrite(STATUS_LED, LOW);
-        return;
-    }
-
-    if (packet.fields.msg_type == TM_MSG_PING) {
-        ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_OK);
-        IF_X_TRUE(ret, "Failed to build packet: ", return);
-
-        sendPacketOnInterface();
-        return;
-    }
-
-    if (packet.fields.msg_type == TM_MSG_RESET) {
-        ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_OK);
-        IF_X_TRUE(ret, "Failed to build packet: ", RESET());
-        lora_if.transmitData(packet.raw, TM_HEADER_LENGTH);
-        RESET();
-    }
-
-    Serial.print("Unhandled request type:");
-    Serial.println(packet.fields.msg_type);
-    uint8_t buf = TM_SERVICE_NOT_IMPLEMENTED;
-    ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_ERR, 0, &buf, 1);
-    IF_X_TRUE(ret, "Failed to build packet: ", return);
-
-    sendPacketOnInterface();
-}
-
-//TODO save interfaces or forward = broadcast
-void forwardPacket() {
-    Serial.println("Forwarding packet");
-    //uint16_t ret = tm.buildPacket(&packet, packet.fields.dst_addr, packet.fields.msg_type, packet.fields.port, packet.fields.data, packet.fields.data_len);
-    //IF_X_TRUE(ret, "Failed to build packet: ", return);
-    sendPacketOnInterface();
-}
-
-
+/** @brief Get data from interface and try to build a pakcet
+ * 
+ * @return 0 on success, lora or tm errors on failure
+ */
 uint16_t getPacketOnInterface() {
     //get data from lora
     uint8_t len;
@@ -207,11 +167,85 @@ uint16_t getPacketOnInterface() {
     //check if packet is valid
     ret = tm.checkHeader(packet);
     IF_X_TRUE(ret, "Incoming packet header bad: ", return ret);
+
+    Serial.println("Got packet:");
+    printPacket();
+    Serial.println("");
+
     return ret;
 }
 
 
-/** @brief Synchronouse send and receive function. Exits once either answer is received or timeout occured enough times.
+void handleIncomingRequest() {
+    uint16_t ret = 0;
+    if (packet.fields.msg_type == TM_MSG_CUSTOM) {
+        if (packet.fields.port == SERVICE_PORT1) {
+            ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_OK, tm.getMessageId(packet) + 1, 0, nullptr, 0);
+            IF_X_TRUE(ret, "Failed to build packet: ", return);
+
+            sendPacketOnInterface();
+
+            //Our "service" is a blink
+            digitalWrite(STATUS_LED, HIGH);
+            delay(1000);
+            digitalWrite(STATUS_LED, LOW);
+            return;
+        }
+        else if (packet.fields.port == SERVICE_PORT2) {
+            Serial.println("This service is not implemented");
+            uint8_t buf = TM_ERR_SERVICE_UNHANDLED;
+            ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_ERR, tm.getMessageId(packet) + 1, 0, &buf, 1);
+            IF_X_TRUE(ret, "Failed to build packet: ", return);
+            
+            sendPacketOnInterface();
+            
+            return;
+        }
+
+        Serial.print("Unknown service port: ");
+        Serial.println(packet.fields.port);
+        Serial.println("^^^^^^^^^^^^^^^^^^^^^^^^^");
+        Serial.println("This should not happen!!!");
+
+        uint8_t buf = TM_ERR_UNKNOWN_PORT;
+        ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_ERR, tm.getMessageId(packet) + 1, 0, &buf, 1);
+        IF_X_TRUE(ret, "Failed to build packet: ", return);
+        
+        sendPacketOnInterface();
+        
+        return;
+    }
+
+    //PING response
+    if (packet.fields.msg_type == TM_MSG_PING) {
+        ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_OK);
+        IF_X_TRUE(ret, "Failed to build packet: ", return);
+
+        sendPacketOnInterface();
+
+        return;
+    }
+
+    //RESET response and reset handling
+    if (packet.fields.msg_type == TM_MSG_RESET) {
+        ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_OK);
+        IF_X_TRUE(ret, "Failed to build packet: ", RESET());
+        lora_if.transmitData(packet.raw, TM_HEADER_LENGTH);
+        RESET();
+    }
+
+    //Rest is not implemented as this device does not use anything else
+    Serial.print("Unhandled request type:");
+    Serial.println(packet.fields.msg_type);
+    uint8_t buf = TM_ERR_MSG_UNHANDLED;
+    ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_ERR, 0, &buf, 1);
+    IF_X_TRUE(ret, "Failed to build packet: ", return);
+
+    sendPacketOnInterface();
+}
+
+
+/** @brief Blocking send and receive function. Exits once either answer is received or timeout/error occured enough times.
  * 
  * @param tries How many times to try to send and wait for answer
  * @param timeout Timeout (ms) when waiting for answer
@@ -246,9 +280,7 @@ uint16_t requestAwaitAnswer(uint8_t tries, uint32_t timeout, uint8_t destination
 
                 ret = tm.checkPacket(packet);
                 IF_X_TRUE(ret != TM_IN_ANSWER, "Incoming packet is not an answer: ", continue);
-                Serial.println("Got answer:");
-                printPacket();
-                Serial.println("");
+                Serial.println("Incoming packet is an answer");
                 return ret;
             }
 
@@ -264,13 +296,16 @@ uint16_t requestAwaitAnswer(uint8_t tries, uint32_t timeout, uint8_t destination
 
 
 void setup() {
-    Serial.begin(9600);
-    Serial.println("Start");
-    delay(1000);
-    SPI.begin();
-
+    //Status LED init
     pinMode(STATUS_LED, OUTPUT);
     digitalWrite(STATUS_LED, LOW);
+
+    //uart init
+    Serial.begin(9600);
+    Serial.println("Start");
+    
+    //SPI init
+    SPI.begin();
 
     //LORA init
     lora.registerMicros(__micros);
@@ -286,11 +321,10 @@ void setup() {
     uint16_t ret = lora.begin(434.0, 0x12, 8, LORA_BANDWIDTH_125kHz, LORA_SPREADING_FACTOR_9, LORA_CODING_RATE_4_7);
     IF_X_TRUE(ret, "lora begin failed: ", failed());
 
-    Serial.println(freeRam());
-
-    //TM init
+    //TinyMesh init
     tm.setSeed(46290);
-    tm.setPort(S_PORT, TM_PORT_IN | TM_PORT_DATA_NONE);
+    tm.addPort(SERVICE_PORT1);
+    tm.addPort(SERVICE_PORT2);
     tm.setAddress(46);
 
     //1. register
@@ -300,12 +334,11 @@ void setup() {
 
     //save data from registration
     tm.clearSavedPackets(millis());
-    //tm.setAddress(packet.fields.data[0]);
     tm.setGatewayAddress(packet.fields.src_addr);
 
     //2. tell gateway our ports
-    uint8_t buf[2] = {S_PORT, TM_PORT_IN | TM_PORT_DATA_NONE};
-    ret = requestAwaitAnswer(3, TM_TIME_TO_STALE, tm.getGatewayAddress(), TM_MSG_PORT_ANOUNCEMENT, 0, buf, 2);
+    uint8_t buf = SERVICE_PORT1;
+    ret = requestAwaitAnswer(3, TM_TIME_TO_STALE, tm.getGatewayAddress(), TM_MSG_PORT_ANOUNCEMENT, 0, &buf, 1);
     IF_X_TRUE(ret, "Failed to send port anouncement: ", failed());
     
 
@@ -317,26 +350,43 @@ auto status_timer = millis();
 void loop() {
     uint16_t ret = 0;
 
-    //if (millis() - status_timer > 7000) {
-    //    status_timer = millis();
-    //    uint8_t msg[] = "ALIVE";
-    //    sendPacketOnInterface(tm.getGatewayAddress(), TM_MSG_STATUS, 0, msg, 5);
-    //}
+    status(0);
 
-    //status(0);
-
+    //single interface receive signal
     if (digitalRead(DIO0)) {
         ret = getPacketOnInterface();
-        IF_X_TRUE(ret, "get interface failed", return);
-
+        if (ret) {
+            Serial.println("Get packet on interface failed");
+            lora_if.startReception();
+            return;
+        }
+        
         ret = tm.checkPacket(packet);
-        IF_X_TRUE(ret == TM_ERR_IN_ANSWER,    "Incoming packet is unrequested answer", return);
-        IF_X_TRUE(ret == TM_ERR_IN_TYPE,      "Incoming packet has wrong type", return);
-        IF_X_TRUE(ret == TM_ERR_IN_PORT,      "Incoming packet has wrong port", return);
-        IF_X_TRUE(ret == TM_ERR_IN_DUPLICATE, "Incoming packet is a duplicate", return);
+        if (ret == TM_ERR_IN_DUPLICATE) {
+            Serial.println("Incoming packet is a duplicate");
+            lora_if.startReception();
+            return;
+        }
 
-        //save received packet
-        IF_X_TRUE(tm.savePacket(packet, millis()), "Failed to save packet: ", {});
+        //save anything that is not duplicate
+        IF_X_TRUE(tm.savePacket(packet), "Failed to save packet", {});
+
+        IF_X_TRUE(ret == TM_ERR_IN_ANSWER,    "Incoming packet is unrequested answer", {});
+        IF_X_TRUE(ret == TM_ERR_IN_TYPE,      "Incoming packet has wrong type", {});    //This shouldn't ever happen
+        
+        if (ret == TM_ERR_IN_PORT) {
+            Serial.print("Incoming packet has unknown port: ");
+            Serial.println(packet.fields.port);
+            
+            uint8_t buf = TM_ERR_UNKNOWN_PORT;
+            ret = tm.buildPacket(&packet, packet.fields.src_addr, TM_MSG_ERR, tm.getMessageId(packet) + 1, 0, &buf, 1);
+            if (ret) {
+                Serial.print("Failed to build a packet: ");
+                Serial.println(ret);
+            }
+            else
+                sendPacketOnInterface();
+        }
 
         if (ret == TM_IN_ANSWER) {
             handleIncomingAnswer();
@@ -345,13 +395,14 @@ void loop() {
             handleIncomingRequest();
         }
         if (ret == TM_IN_BROADCAST) {
-            forwardPacket();
+            sendPacketOnInterface(false);
             handleIncomingRequest();
         }
         if (ret == TM_IN_FORWARD) {
-            forwardPacket();
+            sendPacketOnInterface(false);
         }
 
+        //start receiving data again
         lora_if.startReception();
     }
 
@@ -360,10 +411,5 @@ void loop() {
         Serial.print("Removed stale packet(s): ");
         Serial.println(ret);
     }
-    //if (millis() - status_timer > 15000) {
-    //    //TODO send status
-    //    ret = getPacketOnInterface();
-    //    IF_X_TRUE(ret, "Failed to get data: ", {});
-    //}
 }
 

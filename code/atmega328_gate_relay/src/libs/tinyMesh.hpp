@@ -1,16 +1,17 @@
+/** @file tinyMesh.hpp
+ * @author Lukáš Baštýř (l.bastyr@seznam.cz, 492875)
+ * @brief TinyMesh is a simple protocol for IoT devices.
+ * @version 0.1
+ * @date 27-11-2023
+ * 
+ * @copyright Copyright (c) 2023
+ * 
+ */
+
 #pragma once
 #include <stdint.h>
 
-//get data
-//build packet
-//check packet
-//is it for us?
-    //forward it if not
-    //is it valid port?
-        //if so, answer
-        //if not, error answer
-
-//TODO consistency
+//TODOs are mostly for V1.1 (if that's ever gonna happen)
 /*
 # Packet structure
 -------------HEADER-------------
@@ -99,13 +100,11 @@ Only custom messages are allowed to have flow of any size (continuous request, r
         DESTINATION ADDRESS z (gateway)
         PORT NUMBER         0
         MESSAGE TYPE        PORT_ADVERTISEMENT
-        DATA LENGTH         2 * l
-        DATA...             l pairs of PORT and DATA_TYPE
+        DATA LENGTH         1 * l
+        DATA...             l PORTs
             PORT      8b
-            DATA_TYPE 8b
-                PORT DIR  0bxx000000
-                DATA TYPE 0b00xxxxxx
-    Route anouncement
+            ...
+    TODO Route anouncement
         VERSION             1
         DEVICE TYPE         x
         MESSAGE ID          n
@@ -113,11 +112,11 @@ Only custom messages are allowed to have flow of any size (continuous request, r
         DESTINATION ADDRESS z (gateway)
         PORT NUMBER         0
         MESSAGE TYPE        ROUTE_ANOUNCEMENT
-        DATA LENGTH         2 + l
-        DATA...             LISTENER_ADDRESS, PORT and l extra PORTs
+        DATA LENGTH         2 * l
+        DATA...             LISTENER_ADDRESS and PORT pairs
             LISTENER_ADDRESS 8b
             LISTEN_PORT      8b
-            EXTRA_PORTS      8b * l
+            ...
     Reset
         VERSION             1
         DEVICE TYPE         x
@@ -137,7 +136,7 @@ Only custom messages are allowed to have flow of any size (continuous request, r
         MESSAGE TYPE        STATUS
         DATA LENGTH         l
         DATA...             string of size l
-    //TODO Combined
+    TODO Combined
         VERSION             1
         DEVICE TYPE         x
         MESSAGE ID          n
@@ -185,12 +184,13 @@ Only custom messages are allowed to have flow of any size (continuous request, r
 #define TM_ERR_MSG_TYPE_LEN     0b0000100000000000 //invalid message type and length combination
 
 //TM_ERR_MESSAGES 
-#define TM_SERVICE_NOT_IMPLEMENTED 1
-#define TM_ERR_ADDRESS_LIMIT       2
-#define TM_ERR_UNKNOWN_NODE        3
+#define TM_ERR_MSG_UNHANDLED     1
+#define TM_ERR_SERVICE_UNHANDLED 2
+#define TM_ERR_ADDRESS_LIMIT     3
+#define TM_ERR_UNKNOWN_NODE      4
+#define TM_ERR_UNKNOWN_PORT      5
 
-//#define TM_ERR_CFG_ADDRESS      0b0010000000000000
-
+//Check packet returns
 #define TM_IN_ANSWER        0 //OK, ERR and custom are the only valid responses
 #define TM_IN_REQUEST       1 //packet is a request (anything but OK and ERR)
 #define TM_IN_BROADCAST     2 //packet is a broadcast -> handle (, answer) and forward
@@ -200,8 +200,15 @@ Only custom messages are allowed to have flow of any size (continuous request, r
 #define TM_ERR_IN_PORT      6 //incoming packet is for us but port is not registed
 #define TM_ERR_IN_DUPLICATE 7 //incoming packet is probably a diplicate
 
-#define TM_ERR_PORT_COUNT 1
-#define TM_ERR_SENT_COUNT 1
+//check packet
+#define TM_ERR_PORT_COUNT        1
+#define TM_ERR_PORT_EXISTS       2
+#define TM_ERR_DEFAULT_PORT      3
+#define TM_ERR_PORT_DOESNT_EXIST 4
+
+//save packet id
+#define TM_ERR_SENT_COUNT   1
+//#define TM_ERR_DUPLICATE_ID 2
 
 /*----(MESSAGE TYPES)----*/
 //response
@@ -211,25 +218,12 @@ Only custom messages are allowed to have flow of any size (continuous request, r
 #define TM_MSG_PING              2  //ping device
 #define TM_MSG_REGISTER          3  //register to the newtwork
 #define TM_MSG_PORT_ANOUNCEMENT  4  //anounce what ports a NODE is using
-#define TM_MSG_ROUTE_ANOUNCEMENT 6  //anounc already known routes
-#define TM_MSG_RESET             7  //request a device configuration reset
-#define TM_MSG_STATUS            8  //RAW string
-#define TM_MSG_COMBINED          9  //data contain multiple messages in format |TYPE|LEN|DATA|TYPE...
-#define TM_MSG_CUSTOM            10 //send custom data (to some port)
-#define TM_MSG_MAX               11
-
-//PORT DATA TYPES
-#define TM_PORT_DATA_NONE   0 //port has no defined data type (empty payload)
-#define TM_PORT_DATA_INT8   1 //port has a 8b int data type
-#define TM_PORT_DATA_INT16  2 //port has a 16b int data type
-#define TM_PORT_DATA_INT32  3 //port has a 32b int data type
-#define TM_PORT_DATA_STR    4 //port has a string as data type
-#define TM_PORT_DATA_CUSTOM 5 //port has custom data type
-
-//PORT DIRECTIONS
-#define TM_PORT_IN      0b01000000 //port is for incoming communication
-#define TM_PORT_OUT     0b10000000 //port is for outocming communication
-#define TM_PORT_INOUT   0b11000000 //port is for both incoming and outcoming communication
+#define TM_MSG_RESET             5  //request a device configuration reset
+#define TM_MSG_STATUS            6  //RAW string
+#define TM_MSG_CUSTOM            7 //send custom data (to some port)
+#define TM_MSG_MAX               8
+//#define TM_MSG_ROUTE_ANOUNCEMENT 6  //anounc already known routes //TODO v1.1 
+//#define TM_MSG_COMBINED          9  //data contain multiple messages in format |TYPE|LEN|DATA|TYPE... //TODO v1.1
 
 //NODE TYPES
 #define TM_TYPE_GATEWAY 0 //device is a gateway
@@ -244,8 +238,8 @@ Only custom messages are allowed to have flow of any size (continuous request, r
 #define TM_DEFAULT_PORT      0
 
 #define TM_TIME_TO_STALE     3000 //time in ms for a saved packet to become stale
-#define TM_PORT_COUNT        2 //how manny ports to store (minimum 1)
-#define TM_SENT_Q_SIZE       5 //this array is of type uint64_t, so it takes a lot of space!
+#define TM_PORT_COUNT        2    //how manny ports to store (minimum 1)
+#define TM_SENT_Q_SIZE       10   //this array is of type uint64_t, so it takes a lot of space!
 
 
 typedef union{
@@ -264,21 +258,6 @@ typedef union{
     uint8_t raw[TM_HEADER_LENGTH + TM_DATA_LENGTH];
 } packet_t;
 
-//TODO combined
-typedef struct {
-    uint8_t dst_addr;
-    uint8_t port;
-    uint8_t msg_type;
-    uint8_t length;
-    uint8_t data[TM_DATA_LENGTH];
-} short_packet_t;
-
-typedef struct {
-    uint8_t port;
-    uint8_t type;
-} port_cfg_t;
-
-
 
 class TinyMesh {
 private:
@@ -289,7 +268,9 @@ private:
     uint8_t sent_cnt                      = 0;                    //current number of saved sent packets
     uint8_t port_cnt                      = 0;                    //current number of saved ports
     uint64_t sent_packets[TM_SENT_Q_SIZE] = {0};
-    port_cfg_t ports[TM_PORT_COUNT]       = {{TM_DEFAULT_PORT, TM_PORT_INOUT | TM_PORT_DATA_CUSTOM}}; //TODO use it (add, remove, get, set,...)
+    //port_cfg_t ports[TM_PORT_COUNT]       = {{TM_DEFAULT_PORT, TM_PORT_INOUT | TM_PORT_DATA_CUSTOM}}; //TODO use it (add, remove, get, set,...)
+    uint8_t ports[TM_PORT_COUNT]          = {TM_DEFAULT_PORT}; //TODO use it (add, remove, get, set,...)
+
 
 
     uint16_t lcg(uint16_t seed = 0);
@@ -374,28 +355,27 @@ public:
      */
     uint16_t getMessageId(packet_t packet);
 
-
     /** @brief Change port type or if port does not exist, create it
      * 
      * @param port Port number
      * @param type Port type
      * @return TM_OK on succesful change or creation, TM_ERR_PORT_COUNT when there is not enough space to create new port.
      */
-    uint8_t setPort(uint8_t port, uint8_t type);
+    uint8_t addPort(uint8_t port);
 
     /** @brief Get copy of a port
      * 
      * @param port Port to search for
      * @return port_cfg_t - Found port on success, {0, 0} on failure.
      */
-    port_cfg_t getPort(uint8_t port);
+    bool hasPort(uint8_t port);
     
     /** @brief Remove port
      * 
      * @param port Port number
      * @return port_cfg_t - Found port on success, {0, 0} on failure.
      */
-    port_cfg_t removePort(uint8_t port);
+    uint8_t removePort(uint8_t port);
 
     /** @brief Build packet from a buffer.
      * 
