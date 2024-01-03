@@ -10,7 +10,6 @@
  */
 
 #include "sx127x.hpp"
-#include "Arduino.h"
 
 
 //private
@@ -45,24 +44,24 @@ void SX127X::registerPinMode(void (*func)(uint8_t, uint8_t), uint8_t input, uint
     this->flags.single.has_pin_mode = true;
 }
 
-void SX127X::registerPinWrite(void (*func)(uint8_t, uint8_t), uint8_t high, uint8_t low) {
-    this->pinWrite                   = func;
+void SX127X::registerDigitalWrite(void (*func)(uint8_t, uint8_t), uint8_t high, uint8_t low) {
+    this->digitalWrite                   = func;
     this->high                       = high;
     this->low                        = low;
     this->flags.single.has_pin_write = true;
 }
 
-void SX127X::registerPinRead(uint8_t (*func)(uint8_t)) {
-    this->pinRead = func;
+void SX127X::registerDigitalRead(int (*func)(uint8_t)) {
+    this->digitalRead = func;
     this->flags.single.has_pin_read  = true;
 }
 
-void SX127X::registerDelay(void (*func)(uint32_t)) {
+void SX127X::registerDelay(void (*func)(unsigned long)) {
     this->delay                  = func;
     this->flags.single.has_delay = true;
 }
 
-void SX127X::registerMicros(uint32_t (*micros)()) {
+void SX127X::registerMicros(unsigned long (*micros)()) {
     this->micros = micros;
     this->flags.single.has_micros = true;
 }
@@ -102,8 +101,8 @@ uint8_t SX127X::begin(float frequency, uint8_t sync_word, uint16_t preamble_len,
     }
 
     //set pins to their default state
-    this->pinWrite(this->cs, this->high);
-    this->pinWrite(this->rst, this->high);
+    this->digitalWrite(this->cs, this->high);
+    this->digitalWrite(this->rst, this->high);
 
     //reset the chip on start
     reset();
@@ -165,9 +164,9 @@ uint8_t SX127X::begin(float frequency, uint8_t sync_word, uint16_t preamble_len,
 
 
 void SX127X::reset() {
-    this->pinWrite(this->rst, this->low);
+    this->digitalWrite(this->rst, this->low);
     this->delay(1);
-    this->pinWrite(this->rst, this->high);
+    this->digitalWrite(this->rst, this->high);
     this->delay(10);    //5ms just don't seem to be reliable with ESP
 }
 
@@ -569,7 +568,7 @@ uint8_t SX127X::transmit(uint8_t *data, uint8_t length, uint8_t soft) {
         while(!(readRegister(REG_IRQ_FLAGS) & IRQ_FLAG_TX_DONE));
     //wait for transmission to end
     else
-        while(!this->pinRead(this->dio0));
+        while(!this->digitalRead(this->dio0));
 
     //go back to standby
     setMode(SX127X_OP_MODE_STANDBY);
@@ -590,11 +589,11 @@ uint8_t SX127X::receiveBlocking(uint8_t *data, uint8_t length) {
     uint32_t start = this->micros(); 
 
     //wait for successful reception or exit on timeout
-    while (!this->pinRead(this->dio0)) {
+    while (!this->digitalRead(this->dio0)) {
         //has dio1
         if (this->dio1 != 0) {
             //timeout on dio1
-            if (this->pinRead(this->dio1)) {
+            if (this->digitalRead(this->dio1)) {
                 status = ERR_RX_TIMEOUT;
                 break;
             }
@@ -721,9 +720,9 @@ void SX127X::SPIMakeTransaction(uint8_t addr, uint8_t *data, size_t length) {
     if (this->flags.single.has_spi_start_tr)
         this->SPIBeginTransfer();
 
-    this->pinWrite(this->cs, this->low);
+    this->digitalWrite(this->cs, this->low);
     this->SPITransfer(addr, data, length);
-    this->pinWrite(this->cs, this->high);
+    this->digitalWrite(this->cs, this->high);
 
     if (this->flags.single.has_spi_end_tr)
         this->SPIEndTransfer();

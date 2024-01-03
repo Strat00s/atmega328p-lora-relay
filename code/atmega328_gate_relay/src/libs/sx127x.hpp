@@ -354,10 +354,10 @@ private:
     //TODO make them arduino compatible by default?
     //callbacks
     void (*pinMode)(uint8_t pin, uint8_t mode);
-    void (*pinWrite)(uint8_t pin, uint8_t lvl);
-    uint8_t (*pinRead)(uint8_t pin);
-    void (*delay)(uint32_t delay_ms);
-    uint32_t (*micros)();
+    void (*digitalWrite)(uint8_t pin, uint8_t val);
+    int (*digitalRead)(uint8_t pin);
+    void (*delay)(unsigned long);
+    unsigned long (*micros)();
     void (*SPIBeginTransfer)();
     void (*SPIEndTransfer)();
     /** @brief To be implemented by user. Transfer function for sending
@@ -380,10 +380,10 @@ public:
     ~SX127X();
 
     void registerPinMode(void (*func)(uint8_t, uint8_t), uint8_t input, uint8_t output);
-    void registerPinWrite(void (*func)(uint8_t, uint8_t), uint8_t high = 1, uint8_t low = 0);
-    void registerPinRead(uint8_t (*func)(uint8_t));
-    void registerDelay(void (*func)(uint32_t));
-    void registerMicros(uint32_t (*micros)());
+    void registerDigitalWrite(void (*func)(uint8_t, uint8_t), uint8_t high = 1, uint8_t low = 0);
+    void registerDigitalRead(int (*func)(uint8_t));
+    void registerDelay(void (*func)(unsigned long));
+    void registerMicros(unsigned long (*micros)());
     void registerSPIBeginTransfer(void (*func)());
     void registerSPIEndTransfer(void (*func)());
     /** @brief The underlying callback must be implemented by the user.

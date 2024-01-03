@@ -13,15 +13,11 @@
 
 
 TinyMesh::TinyMesh(uint8_t node_type) {
-    setDeviceType(node_type);
+    setNodeType(node_type);
 }
 
 TinyMesh::TinyMesh(uint8_t node_type, uint8_t address) : TinyMesh(node_type) {
     setAddress(address);
-}
-
-TinyMesh::TinyMesh(uint8_t node_type, uint8_t address, uint8_t version) : TinyMesh(address, node_type) {
-    setVersion(version);
 }
 
 TinyMesh::~TinyMesh() {
@@ -33,7 +29,7 @@ void TinyMesh::setSeed(uint16_t seed) {
     lcg(seed);
 }
 
-void TinyMesh::registerMillis(uint32_t (*millis)()) {
+void TinyMesh::registerMillis(unsigned long (*millis)()) {
     this->millis = millis;
 }
 
@@ -46,7 +42,7 @@ void TinyMesh::setVersion(uint8_t version) {
 }
 
 void TinyMesh::setAddress(uint8_t address) {
-    if (address == 255)
+    if (address == TM_BROADCAST_ADDRESS)
         this->address = TM_DEFAULT_ADDRESS;
     else
         this->address = address;
@@ -56,17 +52,18 @@ void TinyMesh::setGatewayAddress(uint8_t address) {
     this->gateway = address;
 }
 
-void TinyMesh::setDeviceType(uint8_t node_type) {
-    if (node_type > TM_TYPE_LP_NODE)
-        this->node_type = TM_TYPE_NODE;
+void TinyMesh::setNodeType(uint8_t node_type) {
+    if (node_type > TM_NODE_TYPE_OTHER)
+        this->node_type = TM_NODE_TYPE_OTHER;
     else
         this->node_type = node_type;
 }
 
-void TinyMesh::setMessageId(packet_t *packet, uint16_t msg_id) {
-    packet->fields.msg_id_msb = msg_id >> 8;
-    packet->fields.msg_id_lsb = msg_id;
+void TinyMesh::setMessageId(packet_t *packet, uint16_t message_id) {
+    packet->fields.msg_id_msb = message_id >> 8;
+    packet->fields.msg_id_lsb = message_id;
 }
+
 
 uint8_t TinyMesh::getVersion() {
     return this->version;
@@ -80,315 +77,194 @@ uint8_t TinyMesh::getGatewayAddress() {
     return this->gateway;
 }
 
-uint8_t TinyMesh::getDeviceType() {
-    return this->address;
+uint8_t TinyMesh::getNodeType() {
+    return this->node_type;
 }
 
-uint16_t TinyMesh::getMessageId(packet_t packet) {
-    return ((uint16_t)packet.fields.msg_id_msb) << 8 | packet.fields.msg_id_lsb;
-}
-
-
-uint8_t TinyMesh::addPort(uint8_t port) {
-    //check if port exists
-    for (size_t i = 0; i < TM_PORT_COUNT; i++) {
-        if (this->ports[i] == port) {
-            return TM_ERR_PORT_EXISTS;
-        }
-    }
-
-    //port does not exist -> create it
-    for (size_t i = 1; i < TM_PORT_COUNT; i++) {
-        if (this->ports[i] == 0) {
-            this->ports[i] = port;
-            return TM_OK;
-        }
-    }
-
-    //not enough space to create new port
-    return TM_ERR_PORT_COUNT;
-}
-
-bool TinyMesh::hasPort(uint8_t port) {
-    for (size_t i = 0; i < TM_PORT_COUNT; i++) {
-        if (this->ports[i] == port)
-            return true;
-    }
-    return false;
-}
-
-uint8_t TinyMesh::removePort(uint8_t port) {
-    if (port == 0)
-        return TM_ERR_DEFAULT_PORT;
-
-    for (size_t i = 1; i < TM_PORT_COUNT; i++) {
-        if (this->ports[i] == port) {
-            this->ports[i] = 0;
-            return TM_OK;
-        }
-    }
-    return TM_ERR_PORT_DOESNT_EXIST;
+uint16_t TinyMesh::getMessageId(packet_t *packet) {
+    return ((uint16_t)packet->fields.msg_id_msb) << 8 | packet->fields.msg_id_lsb;
 }
 
 
-uint16_t TinyMesh::buildPacket(packet_t *packet, uint8_t *buffer, uint8_t length) {
-    uint16_t ret = TM_OK;
-
-    if (packet == nullptr || buffer == nullptr)
-        return TM_ERR_NULL;
-
-    //at least header size
-    if (length < TM_HEADER_LENGTH)
-        return TM_ERR_HEADER_LEN;
-
-    //copy fields
-    memcpy(packet->raw, buffer, TM_HEADER_LENGTH);
-
-    //check packet
-    ret |= checkHeader(*packet);
-
-    //data length <= max data length
-    if (!(ret & TM_ERR_DATA_LEN)) {
-        //input buffer length more than packet data length
-        if (length - TM_HEADER_LENGTH > packet->fields.data_len) {
-            ret |= TM_ERR_TRUNCATED;
-            memcpy(packet->fields.data, buffer + TM_HEADER_LENGTH, packet->fields.data_len);
-        }
-        //input buffer length less than packet data length
-        if (length - TM_HEADER_LENGTH < packet->fields.data_len) {
-            ret |= TM_ERR_DATA_LEN;
-            memcpy(packet->fields.data, buffer + TM_HEADER_LENGTH, length - TM_HEADER_LENGTH);
-        }
-        else
-            memcpy(packet->fields.data, buffer + TM_HEADER_LENGTH, packet->fields.data_len);
-    }
-    //data length > max data length -> truncate
-    else {
-        ret |= TM_ERR_TRUNCATED;
-        memcpy(packet->fields.data, buffer + TM_HEADER_LENGTH, TM_DATA_LENGTH);
-    }
-
-    return ret;
-}
-
-uint16_t TinyMesh::buildPacket(packet_t *packet, uint8_t destination, uint8_t message_type, uint8_t port, uint8_t *buffer, uint8_t length) {
-    uint8_t ret = buildPacket(packet, destination, message_type, lcg(), port, buffer, length);
-    return ret;
-}
-
-uint16_t TinyMesh::buildPacket(packet_t *packet, uint8_t destination, uint8_t message_type, uint16_t msg_id, uint8_t port, uint8_t *buffer, uint8_t length) {
+uint8_t TinyMesh::buildPacket(packet_t *packet, uint8_t destination, uint16_t message_id, uint8_t message_type, uint8_t *data, uint8_t length) {
     uint16_t ret = TM_OK;
 
     if (packet == nullptr)
         return TM_ERR_NULL;
 
     //build packet
-    packet->fields.version   = this->version;
-    packet->fields.node_type = this->node_type;
-    setMessageId(packet, msg_id);
-    packet->fields.src_addr  = this->address;
-    packet->fields.dst_addr  = destination;
-    packet->fields.port      = port;
-    packet->fields.msg_type  = message_type;
-    packet->fields.data_len  = length;
+    setMessageId(packet, message_id);
+    packet->fields.version                   = this->version;
+    packet->fields.source                    = this->address;
+    packet->fields.destination               = destination;
+    packet->fields.data_length               = length;
+    packet->fields.flags.fields.node_type    = this->node_type;
+    packet->fields.flags.fields.message_type = message_type;
 
     //check if header is valid
-    ret |= checkHeader(*packet);
+    ret |= checkHeader(packet);
 
-    //no data, but length is given -> don't copy anything
-    if (length != 0 && buffer == nullptr)
-        ret |= TM_ERR_NULL;
-    //data are given
-    else if (buffer != nullptr) {
-        //valid length -> copy all data
-        if (!(ret & TM_ERR_DATA_LEN))
-            memcpy(packet->fields.data, buffer, length);
-        //length > max -> truncate
-        else {
-            memcpy(packet->fields.data, buffer, TM_DATA_LENGTH);
-            ret |= TM_ERR_TRUNCATED;
-        }
+    //return now if there are no data to copy
+    if (!length)
+        return ret;
+
+    //data are null, but some are to be copied -> don't copy anything
+    if (data == nullptr && length != 0)
+        return ret |= TM_ERR_DATA_NULL;
+
+    if (length > TM_DATA_LENGTH) {
+        memcpy(packet->fields.data, data, TM_DATA_LENGTH);
+        ret |= TM_ERR_DATA_LENGTH;
     }
+    else
+        memcpy(packet->fields.data, data, length);
 
     return ret;
 }
 
+uint8_t TinyMesh::buildPacket(packet_t *packet, uint8_t *buffer, uint8_t length) {
+    uint8_t ret = TM_OK;
 
-uint16_t TinyMesh::checkHeader(packet_t packet) {
-    uint16_t ret = TM_OK;
+    if (packet == nullptr || buffer == nullptr)
+        return TM_ERR_NULL;
+
+    //build packet
+    //setMessageId(packet, message_id);
+
+    if (length < TM_HEADER_LENGTH)
+        return TM_ERR_BUF_LEN;
+
+    //copy header
+    memcpy(packet->raw, buffer, TM_HEADER_LENGTH);
+
+    //check if header is valid
+    ret |= checkHeader(packet);
+
+
+    uint8_t len2copy = 0;
+    if (ret & TM_ERR_DATA_LENGTH)
+        len2copy = TM_DATA_LENGTH;
+    else
+        len2copy = packet->fields.data_length;
+
+    //packet is shorter than wanted data
+    if (length  - TM_HEADER_LENGTH < len2copy) {
+        memcpy(packet->fields.data, buffer + TM_HEADER_LENGTH, length  - TM_HEADER_LENGTH);
+        ret |= TM_ERR_BUF_LEN;
+    }
+    else
+        memcpy(packet->fields.data, buffer + TM_HEADER_LENGTH, len2copy);
+
+    return ret;
+}
+
+uint8_t TinyMesh::checkHeader(packet_t *packet) {
+    uint8_t ret = TM_OK;
 
     //unsuported version
-    if (packet.fields.version > TM_VERSION)
+    if (packet->fields.version > TM_VERSION)
         ret |= TM_ERR_VERSION;
 
-    //unknown device type
-    if (packet.fields.node_type >= TM_TYPE_MAX)
-        ret |= TM_ERR_DEVICE_TYPE;
-
-    //invalid message id
-    //if ()
-    //    ret |= TM_ERR_MSG_ID;
-
-    //invalid source address
-    if (packet.fields.src_addr == TM_BROADCAST_ADDRESS)
-        ret |= TM_ERR_SOURCE_ADDR;
-
-    //unknown message type
-    if (packet.fields.msg_type >= TM_MSG_MAX)
-        ret |= TM_ERR_MSG_TYPE;
-
-    //custom and port 0, predefined and port other than 0
-    if ((packet.fields.msg_type == TM_MSG_CUSTOM && packet.fields.port == TM_DEFAULT_PORT) ||
-        (packet.fields.msg_type <  TM_MSG_CUSTOM && packet.fields.port != TM_DEFAULT_PORT))
-        ret |= TM_ERR_MSG_TYPE_PORT;
+    if (packet->fields.source == TM_BROADCAST_ADDRESS)
+        ret |= TM_ERR_ADDRESS;
+    
+    if (packet->fields.destination == TM_DEFAULT_ADDRESS)
+        ret |= TM_ERR_ADDRESS;
 
     //data too long
-    if (packet.fields.data_len > TM_DATA_LENGTH)
-        ret |= TM_ERR_DATA_LEN;
+    if (packet->fields.data_length > TM_DATA_LENGTH)
+        ret |= TM_ERR_DATA_LENGTH;
 
-    //message type, address and data length invalid combinations
-    switch (packet.fields.msg_type) {
+    switch (packet->fields.flags.fields.message_type) {
+        case TM_MSG_OK: break;
+        case TM_MSG_ERR:
+            if (packet->fields.data_length != 1)
+                ret |= TM_ERR_MSG_TYPE_LEN;
+            break;
         case TM_MSG_REGISTER:
         case TM_MSG_PING:
         case TM_MSG_RESET:
-            if (packet.fields.data_len != 0)
+            if (packet->fields.data_length != 0)
                 ret |= TM_ERR_MSG_TYPE_LEN;
             break;
-
-        case TM_MSG_ERR:
-            if (packet.fields.data_len != 1)
-                ret |= TM_ERR_MSG_TYPE_LEN;
+        case TM_MSG_STATUS: break;
+        case TM_MSG_CUSTOM: break;
+        default:
+            ret |= TM_ERR_MSG_TYPE;
             break;
-        case TM_MSG_PORT_ANOUNCEMENT:
-            if (packet.fields.data_len == 0)
-                ret |= TM_ERR_MSG_TYPE_LEN;
-            break;
-        //TODO v1.1
-        //case TM_MSG_ROUTE_ANOUNCEMENT:
-        //    if (packet.fields.data_len % 2 != 0)
-        //        ret |= TM_ERR_MSG_TYPE_LEN;
-        //    break;
-        default: break;
     }
 
     return ret;
 }
 
-uint8_t TinyMesh::savePacketID(uint32_t packet_id, uint32_t time, bool force) {
-    if (millis != nullptr && !time)
-        time = millis();
-    time += TM_TIME_TO_STALE;
 
-    if (sent_cnt >= TM_SENT_Q_SIZE) {
-        //if full and force, just shift everything
-        if (force) {
-            for (int i = TM_SENT_Q_SIZE - 1; i > 0; i--) {
-                sent_packets[i] = sent_packets[i - 1];
-            }
-            sent_packets[0] = (uint64_t)time << 32 | packet_id;
-        }
-        return TM_ERR_SENT_COUNT;
-    }
-
-    //find first empty space and save packet ID
-    for (int i = 0; i < TM_SENT_Q_SIZE; i++) {
-        if (sent_packets[i] == 0) {
-            sent_packets[i] = ((uint64_t)time) << 32 | packet_id;
-            break;
-        }
-    }
-    sent_cnt++;
-
-    return TM_OK;
-}
-
-uint8_t TinyMesh::savePacket(packet_t packet, uint32_t time, bool force) {
-    uint32_t packet_id = createPacketID(packet);
-    return savePacketID(packet_id, time, force);
-}
-
-uint8_t TinyMesh::clearSavedPackets(uint32_t time,  bool force) {
-    //millis not registered, time not given, not forced -> nothing to do
-    if (millis == nullptr && !time && !force)
-        return 0;
-    
-    uint8_t removed = 0;
-    for (int i = 0; i < TM_SENT_Q_SIZE; i++) {
-        if (sent_packets[i] == 0)
-            continue;
-        //remove all on force
-        if (force) {
-            sent_packets[i] = 0;
-            sent_cnt = 0;
-            removed++;
-            continue;
-        }
-        //remove stale packet IDs
-        if ((millis != nullptr && sent_packets[i] >> 32 <= millis()) || (time && sent_packets[i] >> 32 <= time)) {
-            sent_packets[i] = 0;
-            sent_cnt--;
-            removed++;
-        }
-    }
-    return removed;
-}
-
-uint8_t TinyMesh::checkPacket(packet_t packet) {
+uint8_t TinyMesh::checkPacket(packet_t *packet) {
     //if packet is in sent queue, it is a duplicate packet
     uint32_t packet_id = createPacketID(packet);
-    for (int i = 0; i < TM_SENT_Q_SIZE; i++) {
-        if (packet_id == (uint32_t)sent_packets[i])
-            return TM_ERR_IN_DUPLICATE;
+    for (int i = 0; i < TM_SENT_QUEUE_SIZE; i++) {
+        if (packet_id == this->sent_queue[i])
+            return TM_PACKET_DUPLICATE;
     }
 
-    //packet is a broadcast
-    if (packet.fields.dst_addr == TM_BROADCAST_ADDRESS) {
-        if (packet.fields.port != 0)
-            return TM_ERR_IN_PORT;
-        return TM_IN_BROADCAST;
-    }
+    uint8_t ret = TM_OK;
+    if (packet->fields.destination == TM_BROADCAST_ADDRESS)
+        ret |= TM_PACKET_FORWARD;
 
-    //user must save this packet manually
-    if (packet.fields.dst_addr != this->address) {
-        return TM_IN_FORWARD;
-    }
+    if (packet->fields.destination == this->address || packet->fields.destination == TM_BROADCAST_ADDRESS) {
+        packet_id = createPacketID((uint32_t)packet->fields.destination, (uint32_t)packet->fields.source, getMessageId(packet) - 1);
 
-    //check if packet is a response to our previous request
-    packet_id = createPacketID(getMessageId(packet) - 1, packet.fields.dst_addr, packet.fields.src_addr);
-    for (int i = 0; i < TM_SENT_Q_SIZE; i++) {
-        //answer to request
-        if (packet_id == (uint32_t)sent_packets[i] || packet_id >> 8 == ((uint32_t)sent_packets[i]) >> 8) {
-            //check for valid port
-            if (!this->hasPort(packet.fields.port))
-                return TM_ERR_IN_PORT;
-            
-            //packet is a valid answer to our request
-            if (packet.fields.msg_type == TM_MSG_OK || packet.fields.msg_type == TM_MSG_ERR || packet.fields.msg_type == TM_MSG_CUSTOM)
-                return TM_IN_ANSWER;
-
-            return TM_ERR_IN_TYPE;
+        //check if packet id with flipped addresses and old message id is in queue (we sent it)
+        //or it is a broadcast response (rare, but can happen mostly for register)
+        for (int i = 0; i < TM_SENT_QUEUE_SIZE; i++) {
+            if (packet_id == this->sent_queue[i] || (packet_id | 0x00FF0000) == this->sent_queue[i])
+                return ret | TM_PACKET_RESPONSE;
         }
+
+        //packet is a response but we didn't send anything, except for register
+        if (packet->fields.flags.fields.message_type == TM_MSG_OK || packet->fields.flags.fields.message_type == TM_MSG_ERR)
+            return ret | TM_PACKET_RND_RESPONSE;
+        
+        //packet is a new request
+        return ret | TM_PACKET_REQUEST;
     }
 
-    //random answer to us
-    if (packet.fields.msg_type == TM_MSG_OK || packet.fields.msg_type == TM_MSG_ERR)
-        return TM_ERR_IN_ANSWER;
+    return TM_PACKET_FORWARD;
+}
 
-    //packet is for us but is not a response -> new packet
-    //user must save this packet manually
-    if (!this->hasPort(packet.fields.port))
-        return TM_ERR_IN_PORT;
-    return TM_IN_REQUEST;
+void TinyMesh::savePacketID(uint32_t packet_id) {
+    for (size_t i = 0; i < TM_SENT_QUEUE_SIZE; i++) {
+        if (this->sent_queue[i] == packet_id)
+            return;
+    }
+    
+    memmove(this->sent_queue + 1, this->sent_queue, sizeof(this->sent_queue) - sizeof(this->sent_queue[0]));
+    this->sent_queue[0] = packet_id;
+    if (millis != nullptr)
+        last_msg_time = millis();
+}
+
+void TinyMesh::savePacket(packet_t *packet) {
+    savePacketID(createPacketID(packet));
+}
+
+uint8_t TinyMesh::clearSentQueue(bool force) {
+    if (force || (millis != nullptr && this->last_msg_time + TM_CLEAR_TIME < millis())) {
+        this->last_msg_time = millis == nullptr? 0 : millis();
+        memset(this->sent_queue, 0, sizeof(this->sent_queue));
+        return 1;
+    }
+    return 0;
 }
 
 
-uint32_t TinyMesh::createPacketID(uint16_t message_id, uint8_t src_addr, uint8_t dst_addr) {
-    return ((uint32_t)message_id) << 16 | ((uint16_t)src_addr) << 8 | dst_addr;
+uint32_t TinyMesh::createPacketID(packet_t *packet) {
+    return ((uint32_t)packet->fields.source) << 24 | ((uint32_t)packet->fields.destination) << 16 | getMessageId(packet);
+}
+uint32_t TinyMesh::createPacketID(uint8_t source, uint8_t destination, uint16_t message_id) {
+    return ((uint32_t)source) << 24 | ((uint32_t)destination) << 16 | message_id;
 }
 
-uint32_t TinyMesh::createPacketID(packet_t packet) {
-    return ((uint32_t)getMessageId(packet)) << 16 | ((uint16_t)packet.fields.src_addr) << 8 | packet.fields.dst_addr;
-}
+
 
 uint16_t TinyMesh::lcg(uint16_t seed) {
     static uint16_t x = seed;
