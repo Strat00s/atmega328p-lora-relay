@@ -27,6 +27,9 @@ TinyMesh tm(TM_NODE_TYPE_NODE);
 SX127X lora(CS, RST, DIO0);
 lora434InterfaceWrapper lora_if(&lora);
 
+uint16_t pattern_intr[2][2] = {{4900, 100}, {500, 100}};
+uint8_t interval = 0;
+
 packet_t packet;
 
 //Timer for scheduling
@@ -34,7 +37,7 @@ auto status_timer = millis();
 auto alive_timer = millis();
 
 
-//SX127X callbacks
+/*----(SX127X CALLBACKS)----*/
 void SPIBeginTransfer() {
     SPI.beginTransaction({14000000, MSBFIRST, SPI_MODE0});
 }
@@ -47,11 +50,7 @@ void SPITransfer(uint8_t addr, uint8_t *buffer, size_t length) {
 }
 
 
-
-uint16_t pattern_intr[2][2] = {{4900, 100}, {500, 100}};
-//uint8_t pattern = 0;
-uint8_t interval = 0;
-
+/*----(HELPERS & OTHER)----*/
 void status(int pattern) {
     static auto status_timer = millis();
     if (millis() - status_timer > pattern_intr[pattern][interval]) {
@@ -66,7 +65,6 @@ void failed() {
         status(1);
     }
 }
-
 
 void printPacket() {
     Serial.print("Version:             ");
@@ -91,14 +89,8 @@ void printPacket() {
     Serial.println();
 }
 
-int freeRam () {
-    extern int __heap_start, *__brkval; 
-    int v; 
-    return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
-}
 
-
-/** @brief Does not do much right now
+/** @brief Handler for incoming packets (not used)
  * 
  */
 void handleIncomingAnswer() {
@@ -119,20 +111,19 @@ void handleIncomingAnswer() {
     }
 }
 
-
 /** @brief Send packet on our only interface and save it's ID
  * 
  * @return 0 on success, errors that occured during transmission
  */
-uint16_t sendPacketOnInterface() {
-    uint16_t ret = 0;
+uint8_t sendPacketOnInterface() {
+    uint8_t ret = 0;
 
     Serial.println("");
     Serial.println("Sending packet:");
     printPacket();
 
     //save packet id and send it
-    uint32_t packet_id = tm.createPacketID(&packet);
+    auto packet_id = tm.createPacketID(&packet);
     ret = lora_if.transmitData(packet.raw, TM_HEADER_LENGTH + packet.fields.data_length);
     IF_X_TRUE(ret, "Failed to transmit data: ", return ret);
     tm.savePacketID(packet_id);
@@ -140,15 +131,14 @@ uint16_t sendPacketOnInterface() {
     return ret;
 }
 
-
 /** @brief Get data from interface and try to build a pakcet
  * 
  * @return 0 on success, lora or tm errors on failure
  */
-uint16_t getPacketOnInterface() {
+uint8_t getPacketOnInterface() {
     //get data from lora
     uint8_t len;
-    uint16_t ret = 0;
+    uint8_t ret = 0;
     ret = lora_if.getData(packet.raw, &len);
     IF_X_TRUE(ret, "Failed to get data: ", return ret);
     
@@ -162,7 +152,6 @@ uint16_t getPacketOnInterface() {
 
     return ret;
 }
-
 
 void handleIncomingRequest() {
     uint16_t ret = 0;
@@ -226,8 +215,8 @@ void handleIncomingRequest() {
  * @param length Length of data
  * @return 
  */
-uint16_t requestAwait(uint8_t retries, uint32_t timeout, uint8_t destination, uint8_t message_type, uint8_t *buffer, uint8_t length) {
-    uint16_t ret = 0;
+uint8_t requestAwait(uint8_t retries, uint32_t timeout, uint8_t destination, uint8_t message_type, uint8_t *buffer, uint8_t length) {
+    uint8_t ret = 0;
 
     for (int i = 0; i < retries; i++) {
         ret = tm.buildPacket(&packet, destination, tm.lcg(), message_type, buffer, length);
