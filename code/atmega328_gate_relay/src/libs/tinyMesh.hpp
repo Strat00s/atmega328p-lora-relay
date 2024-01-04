@@ -10,6 +10,7 @@
 
 #pragma once
 #include <stdint.h>
+#include <stddef.h>
 
 
 /*# Packet structure
@@ -132,8 +133,8 @@
 #define TM_PACKET_FORWARD      0b00010000
 
 /*----(MESSAGE TYPES)----*/
-#define TM_MSG_OK       0b0000
-#define TM_MSG_ERR      0b0001
+#define TM_MSG_OK       0b0000 //response can't be brodcast
+#define TM_MSG_ERR      0b0001 //response can't be brodcast
 #define TM_MSG_REGISTER 0b0010
 #define TM_MSG_PING     0b0011
 #define TM_MSG_STATUS   0b0100
@@ -167,7 +168,7 @@ typedef union{
         uint8_t source;
         uint8_t destination;
         uint8_t msg_id_msb;
-        uint8_t msg_id_lsb; //cannot be zero, must differ from last sent message
+        uint8_t msg_id_lsb;
         union Bits {
             uint8_t raw;
             struct {
@@ -182,6 +183,17 @@ typedef union{
     uint8_t raw[TM_HEADER_LENGTH + TM_DATA_LENGTH];
 } packet_t;
 
+typedef union {
+    struct {
+        uint8_t source;
+        uint8_t destination;
+        uint8_t msg_id_msb;
+        uint8_t msg_id_lsb;
+    } fields;
+    uint8_t raw[4];
+    uint32_t rid;   //raw id (depends on endiannes)
+} packet_id_t;
+
 
 class TinyMesh {
 private:
@@ -189,7 +201,7 @@ private:
     uint8_t address                        = TM_DEFAULT_ADDRESS;   //this NODE address
     uint8_t gateway                        = TM_BROADCAST_ADDRESS; //gateway address
     uint8_t node_type                      = TM_NODE_TYPE_NODE;   //this NODE type
-    uint32_t sent_queue[TM_SENT_QUEUE_SIZE] = {0};
+    packet_id_t sent_queue[TM_SENT_QUEUE_SIZE] = {0};
     uint32_t last_msg_time                 = 0;
 
     unsigned long (*millis)() = nullptr;
@@ -313,7 +325,7 @@ public:
      * 
      * @param packet_id Packet id to save
      */
-    void savePacketID(uint32_t packet_id);
+    void savePacketID(packet_id_t packet_id);
 
     /** @brief Save packet ID from packet to sent queue for duplicity checks
      * 
@@ -324,8 +336,8 @@ public:
     /** @brief Clear queue of received/transmitted messages.*/
     uint8_t clearSentQueue(bool force = false);
 
-    uint32_t createPacketID(packet_t *packet);
-    uint32_t createPacketID(uint8_t source, uint8_t destination, uint16_t message_id);
+    packet_id_t createPacketID(packet_t *packet);
+    packet_id_t createPacketID(uint8_t source, uint8_t destination, uint16_t message_id);
 
 
     uint16_t lcg(uint16_t seed = 0);

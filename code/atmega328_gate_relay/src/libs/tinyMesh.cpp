@@ -167,9 +167,6 @@ uint8_t TinyMesh::checkHeader(packet_t *packet) {
 
     if (packet->fields.source == TM_BROADCAST_ADDRESS)
         ret |= TM_ERR_ADDRESS;
-    
-    if (packet->fields.destination == TM_DEFAULT_ADDRESS)
-        ret |= TM_ERR_ADDRESS;
 
     //data too long
     if (packet->fields.data_length > TM_DATA_LENGTH)
@@ -200,43 +197,54 @@ uint8_t TinyMesh::checkHeader(packet_t *packet) {
 
 uint8_t TinyMesh::checkPacket(packet_t *packet) {
     //if packet is in sent queue, it is a duplicate packet
-    uint32_t packet_id = createPacketID(packet);
-    for (int i = 0; i < TM_SENT_QUEUE_SIZE; i++) {
-        if (packet_id == this->sent_queue[i])
+    packet_id_t packet_id = createPacketID(packet);
+    for (auto spid : this->sent_queue) {
+        if (spid.rid == 0)
+            continue;
+        if (spid.rid == packet_id.rid)
             return TM_PACKET_DUPLICATE;
     }
 
-    uint8_t ret = TM_OK;
-    if (packet->fields.destination == TM_BROADCAST_ADDRESS)
-        ret |= TM_PACKET_FORWARD;
+    //not for us nor broadcast
+    if (packet_id.fields.destination != this->address && packet_id.fields.destination != TM_BROADCAST_ADDRESS)
+        return TM_PACKET_FORWARD;
 
-    if (packet->fields.destination == this->address || packet->fields.destination == TM_BROADCAST_ADDRESS) {
-        packet_id = createPacketID((uint32_t)packet->fields.destination, (uint32_t)packet->fields.source, getMessageId(packet) - 1);
+    //go through saved packets and find if this is a response
+    packet_id = createPacketID((uint32_t)packet->fields.destination, (uint32_t)packet->fields.source, getMessageId(packet) - 1);
+    for (auto spid : this->sent_queue) {
+        if (spid.rid == 0)
+            continue;
 
-        //check if packet id with flipped addresses and old message id is in queue (we sent it)
-        //or it is a broadcast response (rare, but can happen mostly for register)
-        for (int i = 0; i < TM_SENT_QUEUE_SIZE; i++) {
-            if (packet_id == this->sent_queue[i] || (packet_id | 0x00FF0000) == this->sent_queue[i])
-                return ret | TM_PACKET_RESPONSE;
-        }
-
-        //packet is a response but we didn't send anything, except for register
-        if (packet->fields.flags.fields.message_type == TM_MSG_OK || packet->fields.flags.fields.message_type == TM_MSG_ERR)
-            return ret | TM_PACKET_RND_RESPONSE;
-        
-        //packet is a new request
-        return ret | TM_PACKET_REQUEST;
+        //packet is a response to something from us
+        //if request was a brodcast, don't care about response source
+        packet_id_t tmp = packet_id;
+        tmp.fields.destination = 0xFF;
+        if (spid.rid == packet_id.rid || spid.rid == tmp.rid)
+            return TM_PACKET_RESPONSE;
     }
 
-    return TM_PACKET_FORWARD;
+    //packet is not a response to anything from us, but still is a response -> random response
+    if (packet_id.fields.destination == this->address && (packet->fields.flags.fields.message_type == TM_MSG_OK || packet->fields.flags.fields.message_type == TM_MSG_ERR))
+        return TM_PACKET_RND_RESPONSE;
+    
+    //packet is a brodcast request
+    if (packet_id.fields.destination == TM_BROADCAST_ADDRESS)
+        return TM_PACKET_FORWARD | TM_PACKET_REQUEST;
+
+    //anything else is just a normal request
+    return TM_PACKET_REQUEST;
 }
 
-void TinyMesh::savePacketID(uint32_t packet_id) {
-    for (size_t i = 0; i < TM_SENT_QUEUE_SIZE; i++) {
-        if (this->sent_queue[i] == packet_id)
+void TinyMesh::savePacketID(packet_id_t packet_id) {
+    //don't add duplicite packet ids (remove later)
+    for (auto spid : this->sent_queue) {
+        if (spid.rid == 0)
+            continue;
+        if (spid.rid == packet_id.rid)
             return;
     }
-    
+
+    //shift queue and add new packet_id
     memmove(this->sent_queue + 1, this->sent_queue, sizeof(this->sent_queue) - sizeof(this->sent_queue[0]));
     this->sent_queue[0] = packet_id;
     if (millis != nullptr)
@@ -257,11 +265,21 @@ uint8_t TinyMesh::clearSentQueue(bool force) {
 }
 
 
-uint32_t TinyMesh::createPacketID(packet_t *packet) {
-    return ((uint32_t)packet->fields.source) << 24 | ((uint32_t)packet->fields.destination) << 16 | getMessageId(packet);
+packet_id_t TinyMesh::createPacketID(packet_t *packet) {
+    packet_id_t packet_id;
+    packet_id.fields.source = packet->fields.source;
+    packet_id.fields.destination = packet->fields.destination;
+    packet_id.fields.msg_id_msb = packet->fields.msg_id_msb;
+    packet_id.fields.msg_id_lsb = packet->fields.msg_id_lsb;
+    return packet_id;
 }
-uint32_t TinyMesh::createPacketID(uint8_t source, uint8_t destination, uint16_t message_id) {
-    return ((uint32_t)source) << 24 | ((uint32_t)destination) << 16 | message_id;
+packet_id_t TinyMesh::createPacketID(uint8_t source, uint8_t destination, uint16_t message_id) {
+    packet_id_t packet_id;
+    packet_id.fields.source = source;
+    packet_id.fields.destination = destination;
+    packet_id.fields.msg_id_msb = message_id >> 8;
+    packet_id.fields.msg_id_lsb = message_id;
+    return packet_id;
 }
 
 
