@@ -319,11 +319,6 @@ void loop() {
 
         IF_X_TRUE(ret & TM_PACKET_RND_RESPONSE,    "Incoming packet is unrequested answer", return;);
 
-        if (ret & (TM_PACKET_REPEAT | TM_PACKET_FORWARD)) {
-            sendPacketOnInterface();
-            goto skip;
-        }
-
         if (ret & TM_PACKET_REQUEST) {
             handleIncomingRequest(ret & TM_PACKET_REPEAT);
         }
@@ -333,13 +328,12 @@ void loop() {
         if (ret & TM_PACKET_FORWARD) {
             sendPacketOnInterface();
         }
-
-        skip:
+        
         //start receiving data again
         lora_if.startReception();
     }
 
-    if (millis() - alive_timer > 15000) {
+    if (millis() - alive_timer > 60000) {
         alive_timer = millis();
         ret = tm.buildPacket(&packet, tm.getGatewayAddress(), tm.lcg(), TM_MSG_PING);
         IF_X_TRUE(ret, "Failed to build packet: ", return;);
