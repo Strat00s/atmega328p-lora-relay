@@ -26,6 +26,9 @@
 
 #pragma once
 #include <stdio.h>
+#ifdef ARDUINO
+#include <Arduino.h>
+#endif
 
 
 //read and write masks
@@ -324,27 +327,20 @@ private:
     uint8_t dio1 = 0;
 
     //pin control variables
+  #ifndef ARDUINO
     uint8_t input;
     uint8_t output;
     uint8_t high = 1;
     uint8_t low  = 0;
+  #else
+    uint8_t input  = INPUT;
+    uint8_t output = OUTPUT;
+    uint8_t high   = HIGH;
+    uint8_t low    = LOW;
+  #endif
 
-    //"efficient" flags
-    union Bits {
-        uint8_t all = 0;
-        struct bits {
-            uint8_t has_pin_mode       :1;
-            uint8_t has_pin_write      :1;
-            uint8_t has_pin_read       :1;
-            uint8_t has_delay          :1;
-            uint8_t has_micros         :1;
-            uint8_t has_spi_start_tr   :1;
-            uint8_t has_spi_end_tr     :1;
-            uint8_t has_transfer       :1;
-        } single;
-    } flags;
 
-    //variables for internal calculations
+    //default variables for internal calculations
     float frequency     = 434.0;
     uint8_t sf          = LORA_SPREADING_FACTOR_7 >> 4;
     float bw            = 125.0;  //bandwidth in kHz
@@ -353,11 +349,13 @@ private:
 
     //TODO make them arduino compatible by default?
     //callbacks
+  #ifndef ARDUINO
     void (*pinMode)(uint8_t pin, uint8_t mode);
     void (*digitalWrite)(uint8_t pin, uint8_t val);
     int (*digitalRead)(uint8_t pin);
     void (*delay)(unsigned long);
     unsigned long (*micros)();
+  #endif
     void (*SPIBeginTransfer)();
     void (*SPIEndTransfer)();
     /** @brief To be implemented by user. Transfer function for sending
@@ -379,11 +377,13 @@ public:
     SX127X(uint8_t cs, uint8_t rst, uint8_t dio0, uint8_t dio1);
     ~SX127X();
 
+  #ifndef ARDUINO
     void registerPinMode(void (*func)(uint8_t, uint8_t), uint8_t input, uint8_t output);
     void registerDigitalWrite(void (*func)(uint8_t, uint8_t), uint8_t high = 1, uint8_t low = 0);
     void registerDigitalRead(int (*func)(uint8_t));
     void registerDelay(void (*func)(unsigned long));
     void registerMicros(unsigned long (*micros)());
+#endif
     void registerSPIBeginTransfer(void (*func)());
     void registerSPIEndTransfer(void (*func)());
     /** @brief The underlying callback must be implemented by the user.
@@ -396,7 +396,6 @@ public:
      * @param length Length of buffer
      */
     void registerSPITransfer(void (*func)(uint8_t, uint8_t *, size_t));
-
 
     /** @brief Initialize module to it's default settings
      * 

@@ -11,6 +11,10 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
+#ifdef ARDUINO
+#include <Arduino.h>
+#endif
 
 
 /*# Packet structure
@@ -20,74 +24,92 @@
     DESTINATION 8b
     MESSAGE ID  16b
     FLAGS       8b
-        1-0: DEVICE TYPE
-            00 = GATEWAY
-            01 = NODE
-            10 = LP_NODE
-            11 = OTHER
+        7-6: REPEAT CNT
         5-2: MESSAGE TYPE
             0000 = OK
             0001 = ERR
             0010 = REGISTER
             0011 = PING
             0100 = STATUS
-            0101 ... 1110 = RESERVED
+            0101 = TM_MSG_COMBINED
+            0110 ... 1110 = RESERVED
             1111 = CUSTOM
-        6: RESERVED
-        7: RESERVED
+        1-0: DEVICE TYPE
+            00 = GATEWAY
+            01 = NODE
+            10 = LP_NODE
+            11 = OTHER
     DATA LENGTH 8b
 --------------DATA--------------
     DATA...     256b - len(header)
 
 # Predefined messages packet structure and flow:
-    ok
-        VERSION             1
-        NODE TYPE           x
-        MESSAGE ID          n+1
-        SOURCE ADDRESS      z
-        DESTINATION ADDRESS y
-        PORT NUMBER         0
-        MESSAGE TYPE        OK
-        DATA LENGTH         l
-        DATA...             l bytes (depends on answered message)
-    err
-        VERSION             1
-        DEVICE TYPE         x
-        MESSAGE ID          n+1
-        SOURCE ADDRESS      z
-        DESTINATION ADDRESS y
-        PORT NUMBER         0
-        MESSAGE TYPE        ERR
-        DATA LENGTH         1
-        DATA...             ERROR_CODE
-    Ping
-        VERSION             1
-        DEVICE TYPE         x
-        MESSAGE ID          n
-        SOURCE ADDRESS      y
-        DESTINATION ADDRESS z
-        PORT NUMBER         0
-        MESSAGE TYPE        PING
-        DATA LENGTH         0
-    Register
-        VERSION             1
-        DEVICE TYPE         x
-        MESSAGE ID          n
-        SOURCE ADDRESS      0
-        DESTINATION ADDRESS 255
-        PORT NUMBER         0
-        MESSAGE TYPE        REGISTER
-        DATA LENGTH         0
-    Status
-        VERSION             1
-        DEVICE TYPE         x
-        MESSAGE ID          n
-        SOURCE ADDRESS      y
-        DESTINATION ADDRESS z
-        PORT NUMBER         0
-        MESSAGE TYPE        STATUS
-        DATA LENGTH         l
-        DATA...             string of size l
+    OK
+        VERSION
+        SOURCE
+        DESTINATION
+        MESSAGE ID
+        FLAGS
+            7-6: REPEAT CNT
+            5-2: MESSAGE TYPE: TM_MSG_OK
+            1-0: DEVICE TYPE
+        DATA LENGTH: l
+        DATA: l bytes (depends on answered message)
+    ERROR
+        VERSION
+        SOURCE
+        DESTINATION
+        MESSAGE ID
+        FLAGS
+            7-6: REPEAT CNT
+            5-2: MESSAGE TYPE: TM_MSG_ERR
+            1-0: DEVICE TYPE
+        DATA LENGTH: 1
+        DATA: ERROR_CODE
+    PING
+        VERSION
+        SOURCE
+        DESTINATION
+        MESSAGE ID
+        FLAGS
+            7-6: REPEAT CNT
+            5-2: MESSAGE TYPE: TM_MSG_PING
+            1-0: DEVICE TYPE
+        DATA LENGTH: 0
+        DATA...
+    REGISTER
+        VERSION
+        SOURCE
+        DESTINATION: 255
+        MESSAGE ID
+        FLAGS
+            7-6: REPEAT CNT
+            5-2: MESSAGE TYPE: TM_MSG_REGISTER
+            1-0: DEVICE TYPE
+        DATA LENGTH: 0
+        DATA...
+    STATUS
+        VERSION
+        SOURCE
+        DESTINATION
+        MESSAGE ID
+        FLAGS
+            7-6: REPEAT CNT
+            5-2: MESSAGE TYPE: TM_MSG_STATUS
+            1-0: DEVICE TYPE
+        DATA LENGTH: l
+        DATA: string of size l
+    COMBINED
+        VERSION
+        SOURCE
+        DESTINATION
+        MESSAGE ID
+        FLAGS
+            7-6: REPEAT CNT
+            5-2: MESSAGE TYPE: TM_MSG_COMBINED
+            1-0: DEVICE TYPE
+        DATA LENGTH: l
+        DATA: l bytes (depends on answered message)
     Custom
         VERSION             1
         DEVICE TYPE         x
@@ -99,15 +121,20 @@
         DATA LENGTH         l
         DATA...             CUSTOM (l bytes)
 */
+//TODO save only here
+//TODO fix flags...
 
 
 #define TM_VERSION 12
 
-//PACKET PART SIZES
-#define TM_HEADER_LENGTH 7 //header length in bytes
-#ifndef TM_DATA_LENGTH
-    #define TM_DATA_LENGTH   256 - TM_HEADER_LENGTH
-#endif
+//Flag bit locations
+#define TM_NODE_TYPE_LSB 0
+#define TM_NODE_TYPE_MSB 1
+#define TM_MSG_TYPE_LSB  2
+#define TM_MSG_TYPE_MSB  5
+#define TM_RPT_CNT_LSB   6
+#define TM_RPT_CNT_MSB   7
+
 
 //RETURN FLAGS
 #define TM_OK                   0b00000000
@@ -131,15 +158,18 @@
 #define TM_PACKET_RND_RESPONSE 0b00000100
 #define TM_PACKET_REQUEST      0b00001000
 #define TM_PACKET_FORWARD      0b00010000
+#define TM_PACKET_REPEAT       0b00100000
+
+#define TM_MAX_REPEAT 0b11
 
 /*----(MESSAGE TYPES)----*/
 #define TM_MSG_OK       0b0000 //response can't be brodcast
 #define TM_MSG_ERR      0b0001 //response can't be brodcast
-#define TM_MSG_REGISTER 0b0010
-#define TM_MSG_PING     0b0011
-#define TM_MSG_STATUS   0b0100
-#define TM_MSG_RESET    0b1110
-#define TM_MSG_CUSTOM   0b1111
+#define TM_MSG_REGISTER 0b0010 //register to gateway (and get address)
+#define TM_MSG_PING     0b0011 //ping a node
+#define TM_MSG_STATUS   0b0100 //send string status
+#define TM_MSG_COMBINED 0b0101 //combine multiple packets into one
+#define TM_MSG_CUSTOM   0b1111 //send custom data
 
 /*----(NODE TYPES)----*/
 #define TM_NODE_TYPE_GATEWAY 0b00
@@ -148,7 +178,13 @@
 #define TM_NODE_TYPE_OTHER   0b11
 
 
-//DEFAULT CONFIG
+//Packet part sizes
+#define TM_HEADER_LENGTH 7 //header length in bytes
+#ifndef TM_DATA_LENGTH
+    #define TM_DATA_LENGTH   256 - TM_HEADER_LENGTH
+#endif
+
+//Default config
 #ifndef TM_DEFAULT_ADDRESS
     #define TM_DEFAULT_ADDRESS   0 //default address
 #endif
@@ -162,6 +198,10 @@
     #define TM_CLEAR_TIME 3000 //time before clearing entire sent queue in ms
 #endif
 
+
+#define ARRAY_CMP(a1, a2, len) (memcmp(a1, a2, len) == 0) //compare len of arrays against each other
+
+
 typedef union{
     struct {
         uint8_t version;
@@ -169,14 +209,7 @@ typedef union{
         uint8_t destination;
         uint8_t msg_id_msb;
         uint8_t msg_id_lsb;
-        union Bits {
-            uint8_t raw;
-            struct {
-                uint8_t node_type    : 2; // 2 bits for device type (0-1)
-                uint8_t message_type : 4; // 4 bits for message type (2-5)
-                uint8_t reserved     : 2; // 2 bits reserved (6-7)
-            } fields;
-        } flags;
+        uint8_t flags;
         uint8_t data_length;
         uint8_t data[TM_DATA_LENGTH];
     } fields;
@@ -189,9 +222,9 @@ typedef union {
         uint8_t destination;
         uint8_t msg_id_msb;
         uint8_t msg_id_lsb;
+        uint8_t repeat;
     } fields;
-    uint8_t raw[4];
-    uint32_t rid;   //raw id (depends on endiannes)
+    uint8_t raw[5];
 } packet_id_t;
 
 
@@ -204,7 +237,28 @@ private:
     packet_id_t sent_queue[TM_SENT_QUEUE_SIZE] = {0};
     uint32_t last_msg_time                 = 0;
 
+  #ifndef ARDUINO
     unsigned long (*millis)() = nullptr;
+  #endif
+
+    /** @brief Compare len items in array against a specific value*/
+    template<typename T1, typename T2>
+    bool arrayValCmp(T1 array, T2 val, size_t len) {
+        for (size_t i = 0; i < len; i++) {
+            if (array[i] != val)
+                return false;
+        }
+        return true;
+    }
+
+    bool isDuplicate(packet_t *packet) {
+        packet_id_t pid = createPacketID(packet);
+        for (auto &spid : this->sent_queue) {
+            if (ARRAY_CMP(spid.raw, pid.raw, 5))
+                return true;
+        }
+        return false;
+    }
 
 public:
 
@@ -226,6 +280,7 @@ public:
     ~TinyMesh();
 
 
+  #ifndef ARDUINO
     /** @brief Register time keeping function for creating timestamps for packets.
      * It is expected that this function returns time in milliseconds between individual calls of this function.
      * If other time unit is used, edit TM_TIME_TO_STALE macro (or redefine it).
@@ -233,6 +288,7 @@ public:
      * @param millis Function pointer to function returning milliseconds since boot
      */
     void registerMillis(unsigned long (*millis)());
+  #endif
 
     void setSeed(uint16_t seed = 42069);
 
@@ -285,19 +341,22 @@ public:
 
 
     /** @brief Build packet from specific data.
-     * Message ID is generated using builtin LCG.
      * Runs checkHeader() at the end.
+     * Saves packet if valid.
      * 
      * @param packet Packet poiner where to store header and data
      * @param destination Destination node address
+     * @param message_id Id of this message (can be tm.lcg())
      * @param message_type Message type
      * @param data Data which to send
      * @param length Length of data
      * @return TM_OK on succes, TM_ERR_... macros on error
      */
-    uint8_t buildPacket(packet_t *packet, uint8_t destination, uint16_t message_id, uint8_t message_type = TM_MSG_CUSTOM, uint8_t *data = nullptr, uint8_t length = 0);
+    uint8_t buildPacket(packet_t *packet, uint8_t destination, uint16_t message_id, uint8_t message_type = TM_MSG_CUSTOM, uint8_t *data = nullptr, uint8_t length = 0, uint8_t repeat_cnt = 0);
 
     /** @brief Build packet from raw data.
+     * Check packet if it is valid (checkHeader).
+     * Saves packet if valid.
      * 
      * @param packet Packet poiner where to store header and data
      * @param buffer Buffer with raw packet
@@ -315,6 +374,8 @@ public:
 
 
     /** @brief Check packets relation to this node.
+     * Used for received packets.
+     * Saves packet if valid.
      * 
      * @param packet Packet to check
      * @return TM_OK on succes, TM_ERR_... macros on error
@@ -337,8 +398,32 @@ public:
     uint8_t clearSentQueue(bool force = false);
 
     packet_id_t createPacketID(packet_t *packet);
-    packet_id_t createPacketID(uint8_t source, uint8_t destination, uint16_t message_id);
+    packet_id_t createPacketID(uint8_t source, uint8_t destination, uint16_t message_id, uint8_t repeat_cnt);
 
 
     uint16_t lcg(uint16_t seed = 0);
+
+    //flag management helpers
+
+    /** @brief Set specific bits in x to val
+     * 
+     * @tparam T1 
+     * @tparam T2 
+     * @param x 
+     * @param val 
+     * @param msb 
+     * @param lsb 
+     */
+    template<typename T1, typename T2>
+    void setBits(T1 *x, T2 val, uint8_t msb, uint8_t lsb) {
+        T1 mask = ((T1)1 << (msb - lsb + 1)) - 1;
+        mask <<= lsb;
+        *x = (*x & ~mask) | ((val << lsb) & mask);
+    }
+
+    /** @brief Get specific bits from x shifted to start from 1st (lsb) bit*/
+    template<typename T>
+    T getBits(T x, uint8_t msb, uint8_t lsb) {
+        return (x >> lsb) & (((T)1 << (msb - lsb + 1)) - 1);
+    }
 };

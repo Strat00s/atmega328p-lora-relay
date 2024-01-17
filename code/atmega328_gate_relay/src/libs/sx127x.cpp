@@ -37,72 +37,73 @@ SX127X::~SX127X() {
 
 
 //callback functions
+#ifndef ARDUINO
 void SX127X::registerPinMode(void (*func)(uint8_t, uint8_t), uint8_t input, uint8_t output) {
     this->pinMode                   = func;
     this->input                     = input;
     this->output                    = output;
-    this->flags.single.has_pin_mode = true;
+    //this->flags.single.has_pin_mode = true;
 }
 
 void SX127X::registerDigitalWrite(void (*func)(uint8_t, uint8_t), uint8_t high, uint8_t low) {
     this->digitalWrite                   = func;
     this->high                       = high;
     this->low                        = low;
-    this->flags.single.has_pin_write = true;
+    //this->flags.single.has_pin_write = true;
 }
 
 void SX127X::registerDigitalRead(int (*func)(uint8_t)) {
     this->digitalRead = func;
-    this->flags.single.has_pin_read  = true;
+    //this->flags.single.has_pin_read  = true;
 }
 
 void SX127X::registerDelay(void (*func)(unsigned long)) {
     this->delay                  = func;
-    this->flags.single.has_delay = true;
+    //this->flags.single.has_delay = true;
 }
 
 void SX127X::registerMicros(unsigned long (*micros)()) {
     this->micros = micros;
-    this->flags.single.has_micros = true;
+    //this->flags.single.has_micros = true;
 }
+#endif
 
 void SX127X::registerSPIBeginTransfer(void (*func)()) {
     this->SPIBeginTransfer              = func;
-    this->flags.single.has_spi_start_tr = true;
+    //this->flags.single.has_spi_start_tr = true;
 }
 
 void SX127X::registerSPIEndTransfer(void (*func)()) {
     this->SPIEndTransfer              = func;
-    this->flags.single.has_spi_end_tr = true;
+    //this->flags.single.has_spi_end_tr = true;
 }
 
 void SX127X::registerSPITransfer(void (*func)(uint8_t, uint8_t *, size_t)) {
     this->SPITransfer               = func;
-    this->flags.single.has_transfer = true;
+    //this->flags.single.has_transfer = true;
 }
 
 
 uint8_t SX127X::begin(float frequency, uint8_t sync_word, uint16_t preamble_len, uint8_t bandwidth, uint8_t spreading_factor, uint8_t coding_rate) {
-    //check that all required callbacks were set
-    if (!this->flags.single.has_pin_write ||
-        !this->flags.single.has_pin_read  ||
-        !this->flags.single.has_transfer  ||
-        !this->flags.single.has_micros    ||
-        !this->flags.single.has_delay)
+    if (digitalRead  == nullptr ||
+        digitalWrite == nullptr ||
+        SPITransfer  == nullptr ||
+        micros       == nullptr ||
+        delay        == nullptr)
         return ERR_MISSING_CALLBACK;
 
     //toggle pin modes if it was setup
-    if (this->flags.single.has_pin_mode) {
-        this->pinMode(this->cs, this->output);
-        this->pinMode(this->rst, this->output);
-        this->pinMode(this->dio0, this->input);
+    if (pinMode != nullptr) {
+        pinMode(this->cs, this->output);
+        pinMode(this->rst, this->output);
+        pinMode(this->dio0, this->input);
         if (this->dio1 != 0)
-            this->pinMode(this->dio1, this->input);
+            pinMode(this->dio1, this->input);
     }
 
     //set pins to their default state
-    this->digitalWrite(this->cs, this->high);
-    this->digitalWrite(this->rst, this->high);
+    digitalWrite(this->cs, this->high);
+    digitalWrite(this->rst, this->high);
 
     //reset the chip on start
     reset();
@@ -164,10 +165,10 @@ uint8_t SX127X::begin(float frequency, uint8_t sync_word, uint16_t preamble_len,
 
 
 void SX127X::reset() {
-    this->digitalWrite(this->rst, this->low);
-    this->delay(1);
-    this->digitalWrite(this->rst, this->high);
-    this->delay(10);    //5ms just don't seem to be reliable with ESP
+    digitalWrite(this->rst, this->low);
+    delay(1);
+    digitalWrite(this->rst, this->high);
+    delay(10);    //5ms just don't seem to be reliable with ESP
 }
 
 uint8_t SX127X::getVersion() {
@@ -568,7 +569,7 @@ uint8_t SX127X::transmit(uint8_t *data, uint8_t length, uint8_t soft) {
         while(!(readRegister(REG_IRQ_FLAGS) & IRQ_FLAG_TX_DONE));
     //wait for transmission to end
     else
-        while(!this->digitalRead(this->dio0));
+        while(!digitalRead(this->dio0));
 
     //go back to standby
     setMode(SX127X_OP_MODE_STANDBY);
@@ -586,14 +587,14 @@ uint8_t SX127X::receiveBlocking(uint8_t *data, uint8_t length) {
     uint8_t status = 0;
     //calcualte timeout (us)
     uint32_t timeout = (symbol_cnt * float(uint16_t(1) << this->sf) / this->bw) * 1000;
-    uint32_t start = this->micros(); 
+    uint32_t start = micros(); 
 
     //wait for successful reception or exit on timeout
-    while (!this->digitalRead(this->dio0)) {
+    while (!digitalRead(this->dio0)) {
         //has dio1
         if (this->dio1 != 0) {
             //timeout on dio1
-            if (this->digitalRead(this->dio1)) {
+            if (digitalRead(this->dio1)) {
                 status = ERR_RX_TIMEOUT;
                 break;
             }
@@ -601,7 +602,7 @@ uint8_t SX127X::receiveBlocking(uint8_t *data, uint8_t length) {
         //no dio1
         else {
             //timeout from timer
-            if (this->micros() - start > timeout) {
+            if (micros() - start > timeout) {
                 status = ERR_RX_TIMEOUT;
                 break;
             }
@@ -717,14 +718,14 @@ void SX127X::clearIrqFlags() {
 
 
 void SX127X::SPIMakeTransaction(uint8_t addr, uint8_t *data, size_t length) {
-    if (this->flags.single.has_spi_start_tr)
+    if (SPIBeginTransfer != nullptr)
         this->SPIBeginTransfer();
 
-    this->digitalWrite(this->cs, this->low);
+    digitalWrite(this->cs, this->low);
     this->SPITransfer(addr, data, length);
-    this->digitalWrite(this->cs, this->high);
+    digitalWrite(this->cs, this->high);
 
-    if (this->flags.single.has_spi_end_tr)
+    if (SPIEndTransfer != nullptr)
         this->SPIEndTransfer();
 }
 

@@ -70,15 +70,17 @@ void printPacket() {
     Serial.print("Version:             ");
     Serial.println(packet.fields.version);
     Serial.print("Device type:         ");
-    Serial.println(packet.fields.flags.fields.node_type);
+    Serial.println(tm.getBits(packet.fields.flags, TM_NODE_TYPE_MSB, TM_NODE_TYPE_LSB));
     Serial.print("Message id:          ");
     Serial.println(tm.getMessageId(&packet));
+    Serial.print("Repeate count:       ");
+    Serial.println(tm.getBits(packet.fields.flags, TM_RPT_CNT_MSB, TM_RPT_CNT_LSB));
     Serial.print("Source address:      ");
     Serial.println(packet.fields.source);
     Serial.print("Destination address: ");
     Serial.println(packet.fields.destination);
     Serial.print("Message type:        ");
-    Serial.println(packet.fields.flags.fields.message_type);
+    Serial.println(tm.getBits(packet.fields.flags, TM_MSG_TYPE_MSB, TM_MSG_TYPE_LSB));
     Serial.print("Data length:         ");
     Serial.println(packet.fields.data_length);
     Serial.print("Data: ");
@@ -90,11 +92,9 @@ void printPacket() {
 }
 
 
-/** @brief Handler for incoming packets (not used)
- * 
- */
+/** @brief Handler for incoming packets. Not used since this node does not send anything except for register */
 void handleIncomingAnswer() {
-    uint8_t msg_type = packet.fields.flags.fields.message_type;
+    uint8_t msg_type = tm.getBits(packet.fields.flags, TM_MSG_TYPE_MSB, TM_MSG_TYPE_LSB);
     if (msg_type == TM_MSG_OK) {
         Serial.println("OK Answer");
         return;
@@ -123,10 +123,10 @@ uint8_t sendPacketOnInterface() {
     printPacket();
 
     //save packet id and send it
-    auto packet_id = tm.createPacketID(&packet);
+    //auto packet_id = tm.createPacketID(&packet);
     ret = lora_if.transmitData(packet.raw, TM_HEADER_LENGTH + packet.fields.data_length);
     IF_X_TRUE(ret, "Failed to transmit data: ", return ret);
-    tm.savePacketID(packet_id);
+    //tm.savePacketID(packet_id);
 
     return ret;
 }
@@ -155,7 +155,8 @@ uint8_t getPacketOnInterface() {
 
 void handleIncomingRequest() {
     uint16_t ret = 0;
-    if (packet.fields.flags.fields.message_type == TM_MSG_CUSTOM) {
+    uint8_t msg_Type = tm.getBits(packet.fields.flags, TM_MSG_TYPE_MSB, TM_MSG_TYPE_LSB);
+    if (msg_Type == TM_MSG_CUSTOM) {
 
         //listen for data starting with T(oggle) and being long exactly 1
         if (packet.fields.data[0] == 'T' && packet.fields.data_length == 1) {
@@ -183,7 +184,7 @@ void handleIncomingRequest() {
     }
 
     //PING response
-    if (packet.fields.flags.fields.message_type == TM_MSG_PING) {
+    if (msg_Type == TM_MSG_PING) {
         ret = tm.buildPacket(&packet, packet.fields.source, tm.getMessageId(&packet) + 1, TM_MSG_OK);
         IF_X_TRUE(ret, "Failed to build packet: ", return);
 
@@ -195,7 +196,7 @@ void handleIncomingRequest() {
 
     //Nothing else is handled
     Serial.print("Unhandled request type:");
-    Serial.println(packet.fields.flags.fields.message_type);
+    Serial.println(msg_Type);
     uint8_t buf = TM_ERR_MSG_UNHANDLED;
     ret = tm.buildPacket(&packet, packet.fields.source, tm.getMessageId(&packet) + 1, TM_MSG_ERR, &buf, 1);
     IF_X_TRUE(ret, "Failed to build packet: ", return);
@@ -215,11 +216,14 @@ void handleIncomingRequest() {
  * @param length Length of data
  * @return 
  */
-uint8_t requestAwait(uint8_t retries, uint32_t timeout, uint8_t destination, uint8_t message_type, uint8_t *buffer, uint8_t length) {
+uint8_t requestAwait(uint8_t destination, uint8_t message_type, uint8_t *buffer, uint8_t length, uint32_t timeout = TM_CLEAR_TIME / (TM_MAX_REPEAT + 1)) {
     uint8_t ret = 0;
+    uint16_t msg_id = tm.lcg();
 
-    for (int i = 0; i < retries; i++) {
-        ret = tm.buildPacket(&packet, destination, tm.lcg(), message_type, buffer, length);
+    for (int i = 0; i < TM_MAX_REPEAT + 1; i++) {
+        ret = tm.buildPacket(&packet, destination, msg_id, message_type, buffer, length, i);
+        Serial.print("build packet: ");
+        Serial.println(ret);
         IF_X_TRUE(ret, "Failed to build packet: ", continue);
 
         sendPacketOnInterface();
@@ -266,11 +270,6 @@ void setup() {
     SPI.begin();
 
     //LORA init
-    lora.registerMicros(micros);
-    lora.registerDelay(delay);
-    lora.registerPinMode(pinMode, INPUT, OUTPUT);
-    lora.registerDigitalWrite(digitalWrite);
-    lora.registerDigitalRead(digitalRead);
     lora.registerSPIBeginTransfer(SPIBeginTransfer);
     lora.registerSPIEndTransfer(SPIEndTransfer);
     lora.registerSPITransfer(SPITransfer);
@@ -281,11 +280,10 @@ void setup() {
 
     //TinyMesh init
     tm.setSeed(46290);
-    tm.registerMillis(millis);
     tm.setAddress(46);
 
     //1. register
-    ret = requestAwait(3, 3000, tm.getGatewayAddress(), TM_MSG_REGISTER, nullptr, 0);
+    ret = requestAwait(tm.getGatewayAddress(), TM_MSG_REGISTER, nullptr, 0, 1000);
     IF_X_TRUE(ret, "Failed to register: ", failed());
     Serial.println("Registered successfully");
 
@@ -320,9 +318,14 @@ void loop() {
         }
 
         //save anything that is not duplicate
-        tm.savePacket(&packet);
+        //tm.savePacket(&packet);
 
         IF_X_TRUE(ret & TM_PACKET_RND_RESPONSE,    "Incoming packet is unrequested answer", return;);
+
+        if (ret & (TM_PACKET_REPEAT | TM_PACKET_FORWARD)) {
+            sendPacketOnInterface();
+            goto skip;
+        }
 
         if (ret & TM_PACKET_REQUEST) {
             handleIncomingRequest();
@@ -334,6 +337,7 @@ void loop() {
             sendPacketOnInterface();
         }
 
+        skip:
         //start receiving data again
         lora_if.startReception();
     }
