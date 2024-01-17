@@ -125,7 +125,7 @@
 //TODO fix flags...
 
 
-#define TM_VERSION 12
+#define TM_VERSION 1
 
 //Flag bit locations
 #define TM_NODE_TYPE_LSB 0

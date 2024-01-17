@@ -209,8 +209,18 @@ uint8_t TinyMesh::checkPacket(packet_t *packet) {
     uint8_t ret = TM_OK;
     //if packet is in sent queue, it is a duplicate packet
     packet_id_t pid = createPacketID(packet);
-    if (isDuplicate(packet))
-        return TM_PACKET_DUPLICATE;
+
+    for (auto &spid : this->sent_queue) {
+        //same packet id
+        if (ARRAY_CMP(spid.raw, pid.raw, 4)) {
+            //repeat has increased -> update packet
+            if (pid.fields.repeat > spid.fields.repeat) {
+                ret |= TM_PACKET_REPEAT;
+                break;
+            }
+            return TM_PACKET_DUPLICATE;
+        }
+    }
 
     //save the packet (update if repeat)
     savePacket(packet);

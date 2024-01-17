@@ -93,7 +93,7 @@ void printPacket() {
 
 
 /** @brief Handler for incoming packets. Not used since this node does not send anything except for register */
-void handleIncomingAnswer() {
+void handleIncomingResponse() {
     uint8_t msg_type = tm.getBits(packet.fields.flags, TM_MSG_TYPE_MSB, TM_MSG_TYPE_LSB);
     if (msg_type == TM_MSG_OK) {
         Serial.println("OK Answer");
@@ -122,12 +122,8 @@ uint8_t sendPacketOnInterface() {
     Serial.println("Sending packet:");
     printPacket();
 
-    //save packet id and send it
-    //auto packet_id = tm.createPacketID(&packet);
     ret = lora_if.transmitData(packet.raw, TM_HEADER_LENGTH + packet.fields.data_length);
     IF_X_TRUE(ret, "Failed to transmit data: ", return ret);
-    //tm.savePacketID(packet_id);
-
     return ret;
 }
 
@@ -153,28 +149,31 @@ uint8_t getPacketOnInterface() {
     return ret;
 }
 
-void handleIncomingRequest() {
+void handleIncomingRequest(bool repeat = false) {
     uint16_t ret = 0;
     uint8_t msg_Type = tm.getBits(packet.fields.flags, TM_MSG_TYPE_MSB, TM_MSG_TYPE_LSB);
+    uint8_t rpt_cnt = tm.getBits(packet.fields.flags, TM_RPT_CNT_MSB, TM_RPT_CNT_LSB);
     if (msg_Type == TM_MSG_CUSTOM) {
 
         //listen for data starting with T(oggle) and being long exactly 1
         if (packet.fields.data[0] == 'T' && packet.fields.data_length == 1) {
-            ret = tm.buildPacket(&packet, packet.fields.source, tm.getMessageId(&packet) + 1, TM_MSG_OK);
+            ret = tm.buildPacket(&packet, packet.fields.source, tm.getMessageId(&packet) + 1, TM_MSG_OK, nullptr, 0, rpt_cnt);
             IF_X_TRUE(ret, "Failed to build packet: ", return);
 
             sendPacketOnInterface();
 
-            //Our "service" is a blink
-            digitalWrite(STATUS_LED, HIGH);
-            delay(1000);
-            digitalWrite(STATUS_LED, LOW);
+            //Handle our service only if not repeat
+            if (!repeat) {
+                digitalWrite(STATUS_LED, HIGH);
+                delay(1000);
+                digitalWrite(STATUS_LED, LOW);
+            }
             return;
         }
         else {
             Serial.println("Unknown service");
             uint8_t buf = TM_ERR_SERVICE_UNHANDLED;
-            ret = tm.buildPacket(&packet, packet.fields.source, tm.getMessageId(&packet) + 1, TM_MSG_ERR, &buf, 1);
+            ret = tm.buildPacket(&packet, packet.fields.source, tm.getMessageId(&packet) + 1, TM_MSG_ERR, &buf, 1, rpt_cnt);
             IF_X_TRUE(ret, "Failed to build packet: ", return);
 
             sendPacketOnInterface();
@@ -185,7 +184,7 @@ void handleIncomingRequest() {
 
     //PING response
     if (msg_Type == TM_MSG_PING) {
-        ret = tm.buildPacket(&packet, packet.fields.source, tm.getMessageId(&packet) + 1, TM_MSG_OK);
+        ret = tm.buildPacket(&packet, packet.fields.source, tm.getMessageId(&packet) + 1, TM_MSG_OK, nullptr, 0, rpt_cnt);
         IF_X_TRUE(ret, "Failed to build packet: ", return);
 
         sendPacketOnInterface();
@@ -198,7 +197,7 @@ void handleIncomingRequest() {
     Serial.print("Unhandled request type:");
     Serial.println(msg_Type);
     uint8_t buf = TM_ERR_MSG_UNHANDLED;
-    ret = tm.buildPacket(&packet, packet.fields.source, tm.getMessageId(&packet) + 1, TM_MSG_ERR, &buf, 1);
+    ret = tm.buildPacket(&packet, packet.fields.source, tm.getMessageId(&packet) + 1, TM_MSG_ERR, &buf, 1, rpt_cnt);
     IF_X_TRUE(ret, "Failed to build packet: ", return);
 
     sendPacketOnInterface();
@@ -207,16 +206,14 @@ void handleIncomingRequest() {
 
 /** @brief Blocking send and receive function. Exits once either answer is received or timeout/error occured enough times.
  * 
- * @param tries How many times to try to send and wait for answer
- * @param timeout Timeout (ms) when waiting for answer
  * @param destination Destionation to which to send the packet
  * @param message_type Message type
- * @param port Service port
  * @param buffer Buffer containing data to be sent
  * @param length Length of data
+ * @param timeout Timeout (ms) when waiting for answer
  * @return 
  */
-uint8_t requestAwait(uint8_t destination, uint8_t message_type, uint8_t *buffer, uint8_t length, uint32_t timeout = TM_CLEAR_TIME / (TM_MAX_REPEAT + 1)) {
+uint8_t requestAwait(uint8_t destination, uint8_t message_type, uint8_t *buffer, uint8_t length, uint32_t timeout = 1000) {
     uint8_t ret = 0;
     uint16_t msg_id = tm.lcg();
 
@@ -283,7 +280,7 @@ void setup() {
     tm.setAddress(46);
 
     //1. register
-    ret = requestAwait(tm.getGatewayAddress(), TM_MSG_REGISTER, nullptr, 0, 1000);
+    ret = requestAwait(tm.getGatewayAddress(), TM_MSG_REGISTER, nullptr, 0);
     IF_X_TRUE(ret, "Failed to register: ", failed());
     Serial.println("Registered successfully");
 
@@ -328,10 +325,10 @@ void loop() {
         }
 
         if (ret & TM_PACKET_REQUEST) {
-            handleIncomingRequest();
+            handleIncomingRequest(ret & TM_PACKET_REPEAT);
         }
         if (ret & TM_PACKET_RESPONSE) {
-            handleIncomingAnswer();
+            handleIncomingResponse();
         }
         if (ret & TM_PACKET_FORWARD) {
             sendPacketOnInterface();
